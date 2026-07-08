@@ -1,0 +1,28 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.2.0] - 2026-07-09
+
+### Added
+
+- `rotate` command to re-encrypt every stored snapshot under a new
+  passphrase, invalidating the old one. Rotation runs inside a single
+  transaction (all-or-nothing) and copies the database to a timestamped
+  `.bak` file before making changes as a safety net.
+
+## [0.1.0] - 2026-07-08
+
+### Added
+
+- Initial release: `backup`, `restore`, and `list` commands for
+  snapshotting and restoring Doppler secrets to/from a local
+  AES-256-GCM-encrypted SQLite database.
+- Version injection for production builds via `build.sh`.
+- README with usage instructions and MIT license.
+
+[0.2.0]: https://github.com/johndotmcgann/doppler-backup/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/johndotmcgann/doppler-backup/releases/tag/v0.1.0
