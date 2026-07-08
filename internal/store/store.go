@@ -93,6 +93,75 @@ func (s *Store) EnsureSalt(generate func() ([]byte, error)) ([]byte, error) {
 	return salt, nil
 }
 
+// CurrentSalt returns the database's KDF salt, or an error if none has been
+// stored yet (i.e. backup has never run against this database).
+func (s *Store) CurrentSalt() ([]byte, error) {
+	var salt []byte
+	err := s.db.QueryRow(`SELECT kdf_salt FROM meta WHERE id = 1`).Scan(&salt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("no backups exist yet; nothing to rotate")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read kdf salt: %w", err)
+	}
+	return salt, nil
+}
+
+// RotateKey re-encrypts every snapshot and replaces the stored KDF salt
+// inside a single transaction: either every row and the salt update
+// succeed, or none of them do. reencrypt is called once per snapshot and
+// must return the new nonce/ciphertext for newSalt's key.
+func (s *Store) RotateKey(newSalt []byte, reencrypt func(Snapshot) (nonce, ciphertext []byte, err error)) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin rotation: %w", err)
+	}
+
+	rows, err := tx.Query(`SELECT id, project, config, taken_at, nonce, ciphertext FROM snapshots`)
+	if err != nil {
+		tx.Rollback()
+		return 0, fmt.Errorf("read snapshots: %w", err)
+	}
+	var snaps []Snapshot
+	for rows.Next() {
+		var snap Snapshot
+		if err := rows.Scan(&snap.ID, &snap.Project, &snap.Config, &snap.TakenAt, &snap.Nonce, &snap.Ciphertext); err != nil {
+			rows.Close()
+			tx.Rollback()
+			return 0, fmt.Errorf("read snapshot row: %w", err)
+		}
+		snaps = append(snaps, snap)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		tx.Rollback()
+		return 0, fmt.Errorf("iterate snapshots: %w", err)
+	}
+	rows.Close()
+
+	for _, snap := range snaps {
+		nonce, ciphertext, err := reencrypt(snap)
+		if err != nil {
+			tx.Rollback()
+			return 0, fmt.Errorf("rotate snapshot %d (%s/%s): %w", snap.ID, snap.Project, snap.Config, err)
+		}
+		if _, err := tx.Exec(`UPDATE snapshots SET nonce = ?, ciphertext = ? WHERE id = ?`, nonce, ciphertext, snap.ID); err != nil {
+			tx.Rollback()
+			return 0, fmt.Errorf("update snapshot %d: %w", snap.ID, err)
+		}
+	}
+
+	if _, err := tx.Exec(`UPDATE meta SET kdf_salt = ? WHERE id = 1`, newSalt); err != nil {
+		tx.Rollback()
+		return 0, fmt.Errorf("update kdf salt: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit rotation: %w", err)
+	}
+	return len(snaps), nil
+}
+
 // SaveSnapshot inserts a new encrypted snapshot row for project/config.
 func (s *Store) SaveSnapshot(project, config string, nonce, ciphertext []byte) error {
 	_, err := s.db.Exec(

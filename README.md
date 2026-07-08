@@ -80,6 +80,21 @@ it.
 A wrong passphrase fails cleanly with `incorrect passphrase or corrupted
 snapshot` rather than silently writing garbage secrets.
 
+### Rotate passphrase
+
+Re-encrypt every stored snapshot under a new passphrase, invalidating the
+old one:
+
+```sh
+doppler-backup rotate --old-passphrase '<current passphrase>' --new-passphrase '<new passphrase>'
+```
+
+This decrypts every snapshot with the old passphrase and re-encrypts it
+under a freshly generated salt and the new passphrase, all inside a single
+transaction — either everything is rotated or nothing is. Before making any
+changes it copies the database to `<db>.bak-<unix timestamp>` as a safety
+net; delete that copy once you've confirmed the new passphrase works.
+
 ## How it works
 
 - **Backup**: enumerates projects (`doppler projects`) and configs
@@ -101,5 +116,3 @@ snapshot` rather than silently writing garbage secrets.
 
 - No built-in scheduling — run `doppler-backup backup` from cron or a
   similar scheduler for regular snapshots.
-- Passphrase rotation isn't supported; changing passphrases means
-  starting a new database.

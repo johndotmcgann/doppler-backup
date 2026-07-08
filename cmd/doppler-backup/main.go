@@ -3,7 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -27,7 +30,7 @@ func main() {
 	}
 	root.PersistentFlags().StringVar(&dbPath, "db", "./doppler-backup.db", "path to the SQLite backup database")
 
-	root.AddCommand(newBackupCmd(), newRestoreCmd(), newListCmd())
+	root.AddCommand(newBackupCmd(), newRestoreCmd(), newListCmd(), newRotateCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -233,4 +236,87 @@ func runList(project string) error {
 		fmt.Printf("%-6d %-30s %-15s %s\n", s.ID, s.Project, s.Config, s.TakenAt.Format("2006-01-02 15:04:05"))
 	}
 	return nil
+}
+
+func newRotateCmd() *cobra.Command {
+	var oldPassphrase, newPassphrase string
+	cmd := &cobra.Command{
+		Use:   "rotate",
+		Short: "Re-encrypt every snapshot under a new passphrase, invalidating the old one",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRotate(oldPassphrase, newPassphrase)
+		},
+	}
+	cmd.Flags().StringVar(&oldPassphrase, "old-passphrase", "", "current passphrase used to decrypt existing snapshots (required)")
+	cmd.Flags().StringVar(&newPassphrase, "new-passphrase", "", "new passphrase to re-encrypt snapshots with (required)")
+	cmd.MarkFlagRequired("old-passphrase")
+	cmd.MarkFlagRequired("new-passphrase")
+	return cmd
+}
+
+func runRotate(oldPassphrase, newPassphrase string) error {
+	st, err := store.Open(dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	oldSalt, err := st.CurrentSalt()
+	if err != nil {
+		return err
+	}
+	oldKey, err := crypto.DeriveKey(oldPassphrase, oldSalt)
+	if err != nil {
+		return err
+	}
+
+	backupPath, err := copyFile(dbPath)
+	if err != nil {
+		return fmt.Errorf("back up database before rotation: %w", err)
+	}
+
+	newSalt, err := crypto.GenerateSalt()
+	if err != nil {
+		return err
+	}
+	newKey, err := crypto.DeriveKey(newPassphrase, newSalt)
+	if err != nil {
+		return err
+	}
+
+	n, err := st.RotateKey(newSalt, func(snap store.Snapshot) (nonce, ciphertext []byte, err error) {
+		plaintext, err := crypto.Decrypt(oldKey, snap.Nonce, snap.Ciphertext)
+		if err != nil {
+			return nil, nil, err
+		}
+		return crypto.Encrypt(newKey, plaintext)
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("rotated %d snapshot(s); previous database preserved at %s\n", n, backupPath)
+	return nil
+}
+
+// copyFile copies path to path + ".bak-<unix timestamp>" with owner-only
+// permissions, and returns the new path.
+func copyFile(path string) (string, error) {
+	src, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", path, err)
+	}
+	defer src.Close()
+
+	dstPath := path + ".bak-" + strconv.FormatInt(time.Now().Unix(), 10)
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("create %s: %w", dstPath, err)
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return "", fmt.Errorf("copy %s to %s: %w", path, dstPath, err)
+	}
+	return dstPath, nil
 }
