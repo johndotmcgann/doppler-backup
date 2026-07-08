@@ -2,6 +2,5 @@
 /bin/
 *.db
 /build.sh
-/build_pdfv.sh
 /testresults/
 /godocs/
