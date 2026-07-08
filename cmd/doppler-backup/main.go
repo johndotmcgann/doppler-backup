@@ -12,12 +12,16 @@ import (
 	"github.com/mcgannj/doppler-backup/internal/store"
 )
 
+// Version is set at build time via -ldflags "-X main.Version=<git tag>".
+var Version = "dev"
+
 var dbPath string
 
 func main() {
 	root := &cobra.Command{
 		Use:           "doppler-backup",
 		Short:         "Emergency backup/restore for Doppler secrets, snapshotted to an encrypted local SQLite database",
+		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
