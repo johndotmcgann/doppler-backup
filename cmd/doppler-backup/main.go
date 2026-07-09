@@ -20,6 +20,16 @@ var Version = "dev"
 
 var dbPath string
 
+// dopplerClient is the subset of *doppler.Client used by the run* functions
+// below. It exists so tests can substitute a fake implementation instead of
+// shelling out to the real doppler CLI.
+type dopplerClient interface {
+	ListProjects() ([]doppler.Project, error)
+	ListConfigs(project string) ([]doppler.Config, error)
+	DownloadSecrets(project, config string) (map[string]string, error)
+	UploadSecrets(project, config, path string) error
+}
+
 func main() {
 	root := &cobra.Command{
 		Use:           "doppler-backup",
@@ -54,6 +64,10 @@ func newBackupCmd() *cobra.Command {
 }
 
 func runBackup(project, passphrase string) error {
+	return runBackupWithClient(doppler.NewClient(), project, passphrase)
+}
+
+func runBackupWithClient(client dopplerClient, project, passphrase string) error {
 	st, err := store.Open(dbPath)
 	if err != nil {
 		return err
@@ -68,8 +82,6 @@ func runBackup(project, passphrase string) error {
 	if err != nil {
 		return err
 	}
-
-	client := doppler.NewClient()
 
 	var projects []doppler.Project
 	if project != "" {
@@ -107,7 +119,7 @@ func runBackup(project, passphrase string) error {
 	return nil
 }
 
-func backupOne(st *store.Store, client *doppler.Client, key []byte, project, config string) error {
+func backupOne(st *store.Store, client dopplerClient, key []byte, project, config string) error {
 	secrets, err := client.DownloadSecrets(project, config)
 	if err != nil {
 		return err
@@ -144,6 +156,10 @@ func newRestoreCmd() *cobra.Command {
 }
 
 func runRestore(project, config, passphrase string, snapshotID int64) error {
+	return runRestoreWithClient(doppler.NewClient(), project, config, passphrase, snapshotID)
+}
+
+func runRestoreWithClient(client dopplerClient, project, config, passphrase string, snapshotID int64) error {
 	st, err := store.Open(dbPath)
 	if err != nil {
 		return err
@@ -194,7 +210,6 @@ func runRestore(project, config, passphrase string, snapshotID int64) error {
 		return fmt.Errorf("close temp file: %w", err)
 	}
 
-	client := doppler.NewClient()
 	if err := client.UploadSecrets(project, config, tmp.Name()); err != nil {
 		return err
 	}

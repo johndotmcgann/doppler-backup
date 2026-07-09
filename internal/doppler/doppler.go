@@ -31,13 +31,19 @@ type Config struct {
 	Project     string `json:"project"`
 }
 
-type Client struct{}
+type Client struct {
+	runFunc func(args ...string) ([]byte, error)
+}
 
 func NewClient() *Client {
-	return &Client{}
+	return &Client{runFunc: runDoppler}
 }
 
 func (c *Client) run(args ...string) ([]byte, error) {
+	return c.runFunc(args...)
+}
+
+func runDoppler(args ...string) ([]byte, error) {
 	cmd := exec.Command("doppler", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
