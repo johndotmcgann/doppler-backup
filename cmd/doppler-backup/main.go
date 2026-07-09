@@ -246,7 +246,7 @@ func runList(project string) error {
 		fmt.Println("no snapshots found")
 		return nil
 	}
-	fmt.Printf("%-6s %-30s %-15s %s\n", "ID", "PROJECT", "CONFIG", "TAKEN AT")
+	fmt.Printf("%-6s %-30s %-15s %s\n", "ID", "PROJECT", "CONFIG", "TAKEN AT (UTC)")
 	for _, s := range snaps {
 		fmt.Printf("%-6d %-30s %-15s %s\n", s.ID, s.Project, s.Config, s.TakenAt.Format("2006-01-02 15:04:05"))
 	}
