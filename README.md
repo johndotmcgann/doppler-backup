@@ -28,6 +28,12 @@ All commands accept `--db PATH` to choose the SQLite database file
 (default `./doppler-backup.db`). The database is created automatically on
 first use and locked down to owner-only (`0600`) permissions.
 
+`--passphrase` (and `--old-passphrase`/`--new-passphrase` for `rotate`) is
+optional. If omitted and run from a terminal, you'll be prompted for it
+without the input being echoed back; leaving that prompt blank, or running
+non-interactively (e.g. from cron) without the flag, falls back to the
+default passphrase `doppler_backup`.
+
 ### Backup
 
 Snapshot every project and config visible to your Doppler token:

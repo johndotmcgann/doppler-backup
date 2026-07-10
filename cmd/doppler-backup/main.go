@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/mcgannj/doppler-backup/internal/crypto"
 	"github.com/mcgannj/doppler-backup/internal/doppler"
@@ -19,6 +20,10 @@ import (
 var Version = "dev"
 
 var dbPath string
+
+// defaultPassphrase is used when no --passphrase flag is given and the user
+// enters nothing at the interactive prompt.
+const defaultPassphrase = "doppler_backup"
 
 // dopplerClient is the subset of *doppler.Client used by the run* functions
 // below. It exists so tests can substitute a fake implementation instead of
@@ -48,18 +53,80 @@ func main() {
 	}
 }
 
+// resolvePassphrase returns flagValue if set. Otherwise, if stdin is a
+// terminal, it prompts interactively without echoing input; an empty entry
+// (or a non-interactive stdin, e.g. cron) falls back to defaultPassphrase.
+func resolvePassphrase(flagValue, promptLabel string) (string, error) {
+	if flagValue != "" {
+		return flagValue, nil
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return defaultPassphrase, nil
+	}
+	pass, err := readPassword(promptLabel + " (blank for default)")
+	if err != nil {
+		return "", err
+	}
+	if pass == "" {
+		return defaultPassphrase, nil
+	}
+	return pass, nil
+}
+
+// resolveNewPassphrase behaves like resolvePassphrase, except when prompting
+// interactively it asks for the new passphrase twice and requires the two
+// entries to match, guarding against a typo locking the database.
+func resolveNewPassphrase(flagValue string) (string, error) {
+	if flagValue != "" {
+		return flagValue, nil
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return defaultPassphrase, nil
+	}
+	first, err := readPassword("New passphrase (blank for default)")
+	if err != nil {
+		return "", err
+	}
+	if first == "" {
+		return defaultPassphrase, nil
+	}
+	confirm, err := readPassword("Confirm new passphrase")
+	if err != nil {
+		return "", err
+	}
+	if first != confirm {
+		return "", fmt.Errorf("passphrases do not match")
+	}
+	return first, nil
+}
+
+// readPassword prompts label on stderr and reads a line from stdin without
+// echoing it back to the terminal.
+func readPassword(label string) (string, error) {
+	fmt.Fprintf(os.Stderr, "%s: ", label)
+	b, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", fmt.Errorf("read passphrase: %w", err)
+	}
+	return string(b), nil
+}
+
 func newBackupCmd() *cobra.Command {
 	var project, passphrase string
 	cmd := &cobra.Command{
 		Use:   "backup",
 		Short: "Snapshot secrets for all projects (or one, with --project) into the backup database",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBackup(project, passphrase)
+			pass, err := resolvePassphrase(passphrase, "Passphrase")
+			if err != nil {
+				return err
+			}
+			return runBackup(project, pass)
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", "", "limit backup to a single project (default: all projects)")
-	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase used to encrypt secrets at rest (required)")
-	cmd.MarkFlagRequired("passphrase")
+	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase used to encrypt secrets at rest (prompts interactively if omitted; defaults to \"doppler_backup\" if left blank)")
 	return cmd
 }
 
@@ -142,16 +209,19 @@ func newRestoreCmd() *cobra.Command {
 		Use:   "restore",
 		Short: "Restore a project/config's secrets from the most recent (or a specific) snapshot",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRestore(project, config, passphrase, snapshotID)
+			pass, err := resolvePassphrase(passphrase, "Passphrase")
+			if err != nil {
+				return err
+			}
+			return runRestore(project, config, pass, snapshotID)
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", "", "project to restore into (required)")
 	cmd.Flags().StringVar(&config, "config", "", "config to restore into (required)")
-	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase used to decrypt the snapshot (required)")
+	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase used to decrypt the snapshot (prompts interactively if omitted; defaults to \"doppler_backup\" if left blank)")
 	cmd.Flags().Int64Var(&snapshotID, "snapshot", 0, "specific snapshot id to restore (default: latest for project/config)")
 	cmd.MarkFlagRequired("project")
 	cmd.MarkFlagRequired("config")
-	cmd.MarkFlagRequired("passphrase")
 	return cmd
 }
 
@@ -259,13 +329,19 @@ func newRotateCmd() *cobra.Command {
 		Use:   "rotate",
 		Short: "Re-encrypt every snapshot under a new passphrase, invalidating the old one",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRotate(oldPassphrase, newPassphrase)
+			oldPass, err := resolvePassphrase(oldPassphrase, "Current passphrase")
+			if err != nil {
+				return err
+			}
+			newPass, err := resolveNewPassphrase(newPassphrase)
+			if err != nil {
+				return err
+			}
+			return runRotate(oldPass, newPass)
 		},
 	}
-	cmd.Flags().StringVar(&oldPassphrase, "old-passphrase", "", "current passphrase used to decrypt existing snapshots (required)")
-	cmd.Flags().StringVar(&newPassphrase, "new-passphrase", "", "new passphrase to re-encrypt snapshots with (required)")
-	cmd.MarkFlagRequired("old-passphrase")
-	cmd.MarkFlagRequired("new-passphrase")
+	cmd.Flags().StringVar(&oldPassphrase, "old-passphrase", "", "current passphrase used to decrypt existing snapshots (prompts interactively if omitted; defaults to \"doppler_backup\" if left blank)")
+	cmd.Flags().StringVar(&newPassphrase, "new-passphrase", "", "new passphrase to re-encrypt snapshots with (prompts interactively if omitted, with confirmation; defaults to \"doppler_backup\" if left blank)")
 	return cmd
 }
 

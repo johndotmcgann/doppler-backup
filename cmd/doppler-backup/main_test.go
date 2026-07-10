@@ -393,20 +393,41 @@ func TestCopyFileFailsOnExistingDestination(t *testing.T) {
 }
 
 func TestRequiredFlagsEnforced(t *testing.T) {
-	cmd := newBackupCmd()
-	cmd.SetArgs([]string{})
-	cmd.SilenceUsage = true
-	cmd.SilenceErrors = true
-	if err := cmd.Execute(); err == nil {
-		t.Fatalf("expected error when --passphrase is missing from backup")
-	}
-
+	// --passphrase is intentionally not required on any command: omitting
+	// it falls back to an interactive prompt, or defaultPassphrase when
+	// stdin isn't a terminal (see TestResolvePassphrase).
 	restoreCmd := newRestoreCmd()
 	restoreCmd.SetArgs([]string{"--project", "p"})
 	restoreCmd.SilenceUsage = true
 	restoreCmd.SilenceErrors = true
 	if err := restoreCmd.Execute(); err == nil {
-		t.Fatalf("expected error when --config/--passphrase are missing from restore")
+		t.Fatalf("expected error when --config is missing from restore")
+	}
+}
+
+func TestResolvePassphrase(t *testing.T) {
+	pass, err := resolvePassphrase("explicit", "Passphrase")
+	if err != nil || pass != "explicit" {
+		t.Fatalf("expected explicit flag value to win, got %q, %v", pass, err)
+	}
+
+	// go test's stdin isn't a terminal, so an empty flag falls back to the
+	// default passphrase without blocking on a prompt.
+	pass, err = resolvePassphrase("", "Passphrase")
+	if err != nil || pass != defaultPassphrase {
+		t.Fatalf("expected default passphrase for non-interactive stdin, got %q, %v", pass, err)
+	}
+}
+
+func TestResolveNewPassphrase(t *testing.T) {
+	pass, err := resolveNewPassphrase("explicit")
+	if err != nil || pass != "explicit" {
+		t.Fatalf("expected explicit flag value to win, got %q, %v", pass, err)
+	}
+
+	pass, err = resolveNewPassphrase("")
+	if err != nil || pass != defaultPassphrase {
+		t.Fatalf("expected default passphrase for non-interactive stdin, got %q, %v", pass, err)
 	}
 }
 
