@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -229,6 +231,17 @@ func runRestore(project, config, passphrase string, snapshotID int64) error {
 	return runRestoreWithClient(doppler.NewClient(), project, config, passphrase, snapshotID)
 }
 
+// plaintextTempDir returns a memory-backed directory (tmpfs) for the
+// decrypted-secrets temp file used by restore, so the plaintext never
+// touches disk. Falls back to the OS default temp dir (which may or may
+// not be tmpfs) when none is available.
+func plaintextTempDir() string {
+	if info, err := os.Stat("/dev/shm"); err == nil && info.IsDir() {
+		return "/dev/shm"
+	}
+	return ""
+}
+
 func runRestoreWithClient(client dopplerClient, project, config, passphrase string, snapshotID int64) error {
 	st, err := store.Open(dbPath)
 	if err != nil {
@@ -263,11 +276,31 @@ func runRestoreWithClient(client dopplerClient, project, config, passphrase stri
 		return err
 	}
 
-	tmp, err := os.CreateTemp("", "doppler-backup-*.json")
+	tmp, err := os.CreateTemp(plaintextTempDir(), "doppler-backup-*.json")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
 	defer os.Remove(tmp.Name())
+
+	// Best-effort cleanup on SIGINT/SIGTERM: deferred cleanup above doesn't
+	// run if the process is killed mid-restore, leaving decrypted secrets
+	// on disk. This narrows that window but can't catch SIGKILL.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-sigCh:
+			os.Remove(tmp.Name())
+			os.Exit(1)
+		case <-done:
+		}
+	}()
+	defer func() {
+		signal.Stop(sigCh)
+		close(done)
+	}()
+
 	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
 		return fmt.Errorf("restrict temp file permissions: %w", err)

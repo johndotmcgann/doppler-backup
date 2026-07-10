@@ -108,7 +108,14 @@ net; delete that copy once you've confirmed the new passphrase works.
   (`doppler secrets download --json`), encrypts the JSON blob, and stores
   it as one row per project/config/timestamp.
 - **Restore**: decrypts the chosen snapshot, writes it to a temporary
-  `0600` file, and uploads it with `doppler secrets upload`.
+  `0600` file, and uploads it with `doppler secrets upload`. The temp file
+  is created in `/dev/shm` (tmpfs) when available, falling back to the OS
+  default temp directory otherwise, and is removed as soon as the upload
+  finishes. A `SIGINT`/`SIGTERM` handler also removes it if you interrupt
+  a restore mid-flight. None of this protects against `SIGKILL` or a hard
+  crash between the write and the cleanup — in that narrow window,
+  decrypted secrets can be left on disk (or in tmpfs, which itself can be
+  swapped to disk on memory pressure unless swap is disabled).
 - **Encryption**: a random salt is generated once per database and stored
   in a `meta` table. Every run derives a 32-byte key from your passphrase
   and that salt via `scrypt`, then encrypts each snapshot with AES-256-GCM

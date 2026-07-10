@@ -2,9 +2,13 @@ package main
 
 import (
 	"errors"
+	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/mcgannj/doppler-backup/internal/crypto"
 	"github.com/mcgannj/doppler-backup/internal/doppler"
@@ -33,6 +37,7 @@ type fakeClient struct {
 	uploadedProject    string
 	uploadedConfig     string
 	uploadedContent    []byte
+	uploadedPath       string
 	uploadErr          error
 }
 
@@ -69,6 +74,7 @@ func (f *fakeClient) UploadSecrets(project, config, path string) error {
 	f.uploadedProject = project
 	f.uploadedConfig = config
 	f.uploadedContent = content
+	f.uploadedPath = path
 	return nil
 }
 
@@ -207,6 +213,128 @@ func TestRunRestoreWithClientLatestSnapshot(t *testing.T) {
 	}
 	if string(client.uploadedContent) != string(plaintext) {
 		t.Fatalf("expected uploaded content %q, got %q", plaintext, client.uploadedContent)
+	}
+	if _, err := os.Stat(client.uploadedPath); !os.IsNotExist(err) {
+		t.Fatalf("expected temp file %q to be removed after restore, stat err: %v", client.uploadedPath, err)
+	}
+}
+
+// TestRestoreCleansUpTempFileOnSignal verifies the SIGINT handler installed
+// around restore's plaintext temp file: it re-execs this test binary as a
+// child process that restores a snapshot via a client whose UploadSecrets
+// deliberately stalls, sends SIGINT mid-upload, and asserts the temp file
+// is gone once the child exits. This exercises the actual cleanup path
+// (main.go's signal.Notify/os.Exit), which a plain unit test can't reach
+// since it requires killing a real process.
+func TestRestoreCleansUpTempFileOnSignal(t *testing.T) {
+	if os.Getenv("DOPPLER_BACKUP_SIGTEST_CHILD") == "1" {
+		signalTestChildMain()
+		return
+	}
+
+	sigDBPath := filepath.Join(t.TempDir(), "sig.db")
+	pathFile := filepath.Join(t.TempDir(), "tmp-path.txt")
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRestoreCleansUpTempFileOnSignal$")
+	cmd.Env = append(os.Environ(),
+		"DOPPLER_BACKUP_SIGTEST_CHILD=1",
+		"DOPPLER_BACKUP_SIGTEST_DB="+sigDBPath,
+		"DOPPLER_BACKUP_SIGTEST_PATHFILE="+pathFile,
+	)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start child: %v", err)
+	}
+
+	var tempPath string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		b, err := os.ReadFile(pathFile)
+		if err == nil && len(b) > 0 {
+			tempPath = string(b)
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if tempPath == "" {
+		cmd.Process.Kill()
+		cmd.Wait()
+		t.Fatalf("child never reported a temp file path")
+	}
+	if _, err := os.Stat(tempPath); err != nil {
+		t.Fatalf("expected temp file to exist before signal: %v", err)
+	}
+
+	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
+		t.Fatalf("signal child: %v", err)
+	}
+	_ = cmd.Wait()
+
+	if _, err := os.Stat(tempPath); !os.IsNotExist(err) {
+		t.Fatalf("expected temp file %q to be removed after SIGINT, stat err: %v", tempPath, err)
+	}
+}
+
+// signalTestChildMain seeds a snapshot and restores it via a client whose
+// UploadSecrets reports the temp file path and stalls, giving the parent
+// test a window to deliver SIGINT.
+func signalTestChildMain() {
+	dbPath = os.Getenv("DOPPLER_BACKUP_SIGTEST_DB")
+	pathFile := os.Getenv("DOPPLER_BACKUP_SIGTEST_PATHFILE")
+
+	st, err := store.Open(dbPath)
+	if err != nil {
+		log.Fatalf("open store: %v", err)
+	}
+	salt, err := st.EnsureSalt(crypto.GenerateSalt)
+	if err != nil {
+		log.Fatalf("ensure salt: %v", err)
+	}
+	key, err := crypto.DeriveKey("passphrase", salt)
+	if err != nil {
+		log.Fatalf("derive key: %v", err)
+	}
+	nonce, ciphertext, err := crypto.Encrypt(key, []byte(`{"KEY":"val"}`))
+	if err != nil {
+		log.Fatalf("encrypt: %v", err)
+	}
+	if err := st.SaveSnapshot("proj", "dev", nonce, ciphertext); err != nil {
+		log.Fatalf("save snapshot: %v", err)
+	}
+	st.Close()
+
+	client := &slowUploadClient{pathFile: pathFile}
+	if err := runRestoreWithClient(client, "proj", "dev", "passphrase", 0); err != nil {
+		log.Fatalf("restore: %v", err)
+	}
+}
+
+// slowUploadClient reports the temp file path it was handed and then stalls,
+// simulating an upload that's still in flight when a signal arrives.
+type slowUploadClient struct {
+	pathFile string
+}
+
+func (c *slowUploadClient) ListProjects() ([]doppler.Project, error) { return nil, nil }
+func (c *slowUploadClient) ListConfigs(string) ([]doppler.Config, error) {
+	return nil, nil
+}
+func (c *slowUploadClient) DownloadSecrets(string, string) (map[string]string, error) {
+	return nil, nil
+}
+func (c *slowUploadClient) UploadSecrets(_, _, path string) error {
+	if err := os.WriteFile(c.pathFile, []byte(path), 0o600); err != nil {
+		return err
+	}
+	time.Sleep(3 * time.Second)
+	return nil
+}
+
+func TestPlaintextTempDirPrefersTmpfs(t *testing.T) {
+	dir := plaintextTempDir()
+	if _, err := os.Stat("/dev/shm"); err == nil {
+		if dir != "/dev/shm" {
+			t.Fatalf("expected /dev/shm when available, got %q", dir)
+		}
 	}
 }
 
