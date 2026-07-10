@@ -1,9 +1,10 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
 # Production build script for doppler-backup.
 # Always builds and installs the executable to $HOME/Executables.
 #
 set -e
+set -o pipefail
 
 printf 'Commencing production build for doppler-backup.\n'
 
@@ -36,13 +37,6 @@ if [ -n "$BUMP" ]; then
     git tag -a "$NEW_TAG" -m "Release $NEW_TAG"
 fi
 
-# ── Test results dir ──────────────────────────────────────────────────────────
-printf '\nGenerating test results file.\n'
-mkdir -p testresults
-DT_STAMP=$(date "+%Y%m%d%H%M%S")
-RESULTS_FILE="testresults/testresults_${DT_STAMP}.json"
-touch "$RESULTS_FILE"
-
 # Where are we in the file system
 pwd
 
@@ -51,8 +45,21 @@ printf '\nVet the contents of the project.\n'
 go vet ./...
 
 # ── Test ──────────────────────────────────────────────────────────────────────
-printf '\nRun tests; redirect output to .json file.\n'
-go test -json ./... > "$RESULTS_FILE"
+# The results file is created only once vet has passed, so an empty/missing
+# file unambiguously means "tests never ran" rather than looking like a
+# recorded (but silently truncated) run.
+printf '\nGenerating test results file.\n'
+mkdir -p testresults
+DT_STAMP=$(date "+%Y%m%d%H%M%S")
+RESULTS_FILE="testresults/testresults_${DT_STAMP}.json"
+
+printf '\nRun tests; tee output to .json file.\n'
+go test -json ./... | tee "$RESULTS_FILE"
+
+if [ ! -s "$RESULTS_FILE" ]; then
+    printf '\nError: %s is empty; go test produced no output.\n' "$RESULTS_FILE"
+    exit 1
+fi
 
 printf '\nReport on the test coverage.\n'
 go test -cover ./...
