@@ -71,12 +71,22 @@ func (s *Store) migrate() error {
 	return nil
 }
 
+// readSalt returns the database's stored KDF salt, or sql.ErrNoRows if none
+// has been stored yet.
+func (s *Store) readSalt() ([]byte, error) {
+	var salt []byte
+	err := s.db.QueryRow(`SELECT kdf_salt FROM meta WHERE id = 1`).Scan(&salt)
+	if err != nil {
+		return nil, err
+	}
+	return salt, nil
+}
+
 // EnsureSalt returns the database's KDF salt, generating and persisting one
 // on first use so every subsequent run derives the same key from a given
 // passphrase.
 func (s *Store) EnsureSalt(generate func() ([]byte, error)) ([]byte, error) {
-	var salt []byte
-	err := s.db.QueryRow(`SELECT kdf_salt FROM meta WHERE id = 1`).Scan(&salt)
+	salt, err := s.readSalt()
 	if err == nil {
 		return salt, nil
 	}
@@ -96,8 +106,7 @@ func (s *Store) EnsureSalt(generate func() ([]byte, error)) ([]byte, error) {
 // CurrentSalt returns the database's KDF salt, or an error if none has been
 // stored yet (i.e. backup has never run against this database).
 func (s *Store) CurrentSalt() ([]byte, error) {
-	var salt []byte
-	err := s.db.QueryRow(`SELECT kdf_salt FROM meta WHERE id = 1`).Scan(&salt)
+	salt, err := s.readSalt()
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("no backups exist yet; nothing to rotate")
 	}

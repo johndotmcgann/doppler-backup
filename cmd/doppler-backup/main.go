@@ -136,21 +136,33 @@ func runBackup(project, passphrase string) error {
 	return runBackupWithClient(doppler.NewClient(), project, passphrase)
 }
 
-func runBackupWithClient(client dopplerClient, project, passphrase string) error {
+// openStoreAndKey opens the backup database at dbPath and derives the
+// AES key for passphrase from its (ensuring-if-absent) KDF salt. On error
+// the store is closed before returning.
+func openStoreAndKey(passphrase string) (*store.Store, []byte, error) {
 	st, err := store.Open(dbPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	salt, err := st.EnsureSalt(crypto.GenerateSalt)
+	if err != nil {
+		st.Close()
+		return nil, nil, err
+	}
+	key, err := crypto.DeriveKey(passphrase, salt)
+	if err != nil {
+		st.Close()
+		return nil, nil, err
+	}
+	return st, key, nil
+}
+
+func runBackupWithClient(client dopplerClient, project, passphrase string) error {
+	st, key, err := openStoreAndKey(passphrase)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
-
-	salt, err := st.EnsureSalt(crypto.GenerateSalt)
-	if err != nil {
-		return err
-	}
-	key, err := crypto.DeriveKey(passphrase, salt)
-	if err != nil {
-		return err
-	}
 
 	var projects []doppler.Project
 	if project != "" {
@@ -243,20 +255,11 @@ func plaintextTempDir() string {
 }
 
 func runRestoreWithClient(client dopplerClient, project, config, passphrase string, snapshotID int64) error {
-	st, err := store.Open(dbPath)
+	st, key, err := openStoreAndKey(passphrase)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
-
-	salt, err := st.EnsureSalt(crypto.GenerateSalt)
-	if err != nil {
-		return err
-	}
-	key, err := crypto.DeriveKey(passphrase, salt)
-	if err != nil {
-		return err
-	}
 
 	var snap *store.Snapshot
 	if snapshotID != 0 {
