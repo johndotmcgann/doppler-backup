@@ -144,12 +144,12 @@ func openStoreAndKey(passphrase string) (*store.Store, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	salt, err := st.EnsureSalt(crypto.GenerateSalt)
+	salt, params, err := st.EnsureSalt(crypto.GenerateSalt, store.KDFParams(crypto.DefaultParams()))
 	if err != nil {
 		st.Close()
 		return nil, nil, err
 	}
-	key, err := crypto.DeriveKey(passphrase, salt)
+	key, err := crypto.DeriveKey(passphrase, salt, crypto.Params(params))
 	if err != nil {
 		st.Close()
 		return nil, nil, err
@@ -388,11 +388,11 @@ func runRotate(oldPassphrase, newPassphrase string) error {
 	}
 	defer st.Close()
 
-	oldSalt, err := st.CurrentSalt()
+	oldSalt, oldParams, err := st.CurrentSalt()
 	if err != nil {
 		return err
 	}
-	oldKey, err := crypto.DeriveKey(oldPassphrase, oldSalt)
+	oldKey, err := crypto.DeriveKey(oldPassphrase, oldSalt, crypto.Params(oldParams))
 	if err != nil {
 		return err
 	}
@@ -406,12 +406,13 @@ func runRotate(oldPassphrase, newPassphrase string) error {
 	if err != nil {
 		return err
 	}
-	newKey, err := crypto.DeriveKey(newPassphrase, newSalt)
+	newParams := crypto.DefaultParams()
+	newKey, err := crypto.DeriveKey(newPassphrase, newSalt, newParams)
 	if err != nil {
 		return err
 	}
 
-	n, err := st.RotateKey(newSalt, func(snap store.Snapshot) (nonce, ciphertext []byte, err error) {
+	n, err := st.RotateKey(newSalt, store.KDFParams(newParams), func(snap store.Snapshot) (nonce, ciphertext []byte, err error) {
 		plaintext, err := crypto.Decrypt(oldKey, snap.Nonce, snap.Ciphertext)
 		if err != nil {
 			return nil, nil, err

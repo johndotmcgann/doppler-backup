@@ -15,11 +15,23 @@ const (
 	SaltLen  = 16
 	nonceLen = 12
 	keyLen   = 32
-
-	scryptN = 1 << 15
-	scryptR = 8
-	scryptP = 1
 )
+
+// Params holds the scrypt work-factor parameters used to derive a key from a
+// passphrase. A database persists the Params it was created with alongside
+// its salt, so DefaultParams can be strengthened over time without breaking
+// decryption of snapshots created under older, weaker defaults.
+type Params struct {
+	N, R, P int
+}
+
+// DefaultParams returns the scrypt parameters used for newly created
+// databases. N=1<<15 was scrypt's original 2009 "interactive" (per-request)
+// default; this KDF instead runs at most once per CLI invocation, so a
+// higher work factor is free in practice.
+func DefaultParams() Params {
+	return Params{N: 1 << 17, R: 8, P: 1}
+}
 
 // GenerateSalt returns a fresh random salt, stored once per database and
 // reused to derive the encryption key from the passphrase on every run.
@@ -31,9 +43,12 @@ func GenerateSalt() ([]byte, error) {
 	return salt, nil
 }
 
-// DeriveKey derives a 32-byte AES key from the passphrase and salt via scrypt.
-func DeriveKey(passphrase string, salt []byte) ([]byte, error) {
-	key, err := scrypt.Key([]byte(passphrase), salt, scryptN, scryptR, scryptP, keyLen)
+// DeriveKey derives a 32-byte AES key from the passphrase and salt via
+// scrypt, using params (the ones stored alongside the salt, so a given
+// database always re-derives under whatever work factor it was created
+// with).
+func DeriveKey(passphrase string, salt []byte, params Params) ([]byte, error) {
+	key, err := scrypt.Key([]byte(passphrase), salt, params.N, params.R, params.P, keyLen)
 	if err != nil {
 		return nil, fmt.Errorf("derive key: %w", err)
 	}

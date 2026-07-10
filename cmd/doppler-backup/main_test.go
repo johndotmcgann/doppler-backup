@@ -15,6 +15,10 @@ import (
 	"github.com/mcgannj/doppler-backup/internal/store"
 )
 
+// testKDFParams uses a much smaller N than crypto.DefaultParams so these
+// tests don't pay real scrypt work-factor cost on every DeriveKey call.
+var testKDFParams = store.KDFParams{N: 1 << 4, R: 8, P: 1}
+
 // setTestDB points the package-level dbPath at a fresh temp file for the
 // duration of the test.
 func setTestDB(t *testing.T) string {
@@ -185,11 +189,11 @@ func TestRunRestoreWithClientLatestSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	salt, err := st.EnsureSalt(crypto.GenerateSalt)
+	salt, params, err := st.EnsureSalt(crypto.GenerateSalt, testKDFParams)
 	if err != nil {
 		t.Fatalf("ensure salt: %v", err)
 	}
-	key, err := crypto.DeriveKey("passphrase", salt)
+	key, err := crypto.DeriveKey("passphrase", salt, crypto.Params(params))
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
@@ -285,11 +289,11 @@ func signalTestChildMain() {
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}
-	salt, err := st.EnsureSalt(crypto.GenerateSalt)
+	salt, params, err := st.EnsureSalt(crypto.GenerateSalt, testKDFParams)
 	if err != nil {
 		log.Fatalf("ensure salt: %v", err)
 	}
-	key, err := crypto.DeriveKey("passphrase", salt)
+	key, err := crypto.DeriveKey("passphrase", salt, crypto.Params(params))
 	if err != nil {
 		log.Fatalf("derive key: %v", err)
 	}
@@ -345,11 +349,11 @@ func TestRunRestoreWithClientSpecificSnapshotID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	salt, err := st.EnsureSalt(crypto.GenerateSalt)
+	salt, params, err := st.EnsureSalt(crypto.GenerateSalt, testKDFParams)
 	if err != nil {
 		t.Fatalf("ensure salt: %v", err)
 	}
-	key, err := crypto.DeriveKey("passphrase", salt)
+	key, err := crypto.DeriveKey("passphrase", salt, crypto.Params(params))
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
@@ -402,11 +406,11 @@ func TestRunRestoreWithClientWrongPassphraseFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	salt, err := st.EnsureSalt(crypto.GenerateSalt)
+	salt, params, err := st.EnsureSalt(crypto.GenerateSalt, testKDFParams)
 	if err != nil {
 		t.Fatalf("ensure salt: %v", err)
 	}
-	key, err := crypto.DeriveKey("correct-passphrase", salt)
+	key, err := crypto.DeriveKey("correct-passphrase", salt, crypto.Params(params))
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
@@ -432,11 +436,11 @@ func TestRunRotateEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	salt, err := st.EnsureSalt(crypto.GenerateSalt)
+	salt, params, err := st.EnsureSalt(crypto.GenerateSalt, testKDFParams)
 	if err != nil {
 		t.Fatalf("ensure salt: %v", err)
 	}
-	oldKey, err := crypto.DeriveKey("old-passphrase", salt)
+	oldKey, err := crypto.DeriveKey("old-passphrase", salt, crypto.Params(params))
 	if err != nil {
 		t.Fatalf("derive old key: %v", err)
 	}

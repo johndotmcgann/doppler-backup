@@ -2,6 +2,10 @@ package crypto
 
 import "testing"
 
+// testParams uses a much smaller N than DefaultParams so the test suite
+// doesn't pay real scrypt work-factor cost on every DeriveKey call.
+var testParams = Params{N: 1 << 4, R: 8, P: 1}
+
 func TestGenerateSalt(t *testing.T) {
 	a, err := GenerateSalt()
 	if err != nil {
@@ -22,7 +26,7 @@ func TestGenerateSalt(t *testing.T) {
 func TestDeriveKey(t *testing.T) {
 	salt := []byte("0123456789abcdef")
 
-	k1, err := DeriveKey("correct horse", salt)
+	k1, err := DeriveKey("correct horse", salt, testParams)
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
@@ -30,7 +34,7 @@ func TestDeriveKey(t *testing.T) {
 		t.Fatalf("expected 32-byte key, got %d", len(k1))
 	}
 
-	k2, err := DeriveKey("correct horse", salt)
+	k2, err := DeriveKey("correct horse", salt, testParams)
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
@@ -38,7 +42,7 @@ func TestDeriveKey(t *testing.T) {
 		t.Fatalf("expected same passphrase+salt to derive the same key")
 	}
 
-	k3, err := DeriveKey("different passphrase", salt)
+	k3, err := DeriveKey("different passphrase", salt, testParams)
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
@@ -46,7 +50,7 @@ func TestDeriveKey(t *testing.T) {
 		t.Fatalf("expected different passphrase to derive a different key")
 	}
 
-	k4, err := DeriveKey("correct horse", []byte("fedcba9876543210"))
+	k4, err := DeriveKey("correct horse", []byte("fedcba9876543210"), testParams)
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
@@ -56,7 +60,7 @@ func TestDeriveKey(t *testing.T) {
 }
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {
-	key, err := DeriveKey("passphrase", []byte("0123456789abcdef"))
+	key, err := DeriveKey("passphrase", []byte("0123456789abcdef"), testParams)
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
@@ -77,7 +81,7 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 }
 
 func TestEncryptNoncesAreUnique(t *testing.T) {
-	key, err := DeriveKey("passphrase", []byte("0123456789abcdef"))
+	key, err := DeriveKey("passphrase", []byte("0123456789abcdef"), testParams)
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
@@ -96,11 +100,11 @@ func TestEncryptNoncesAreUnique(t *testing.T) {
 }
 
 func TestDecryptWrongKeyFails(t *testing.T) {
-	key1, err := DeriveKey("passphrase-one", []byte("0123456789abcdef"))
+	key1, err := DeriveKey("passphrase-one", []byte("0123456789abcdef"), testParams)
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
-	key2, err := DeriveKey("passphrase-two", []byte("0123456789abcdef"))
+	key2, err := DeriveKey("passphrase-two", []byte("0123456789abcdef"), testParams)
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
@@ -115,7 +119,7 @@ func TestDecryptWrongKeyFails(t *testing.T) {
 }
 
 func TestDecryptTamperedCiphertextFails(t *testing.T) {
-	key, err := DeriveKey("passphrase", []byte("0123456789abcdef"))
+	key, err := DeriveKey("passphrase", []byte("0123456789abcdef"), testParams)
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
@@ -132,7 +136,7 @@ func TestDecryptTamperedCiphertextFails(t *testing.T) {
 }
 
 func TestDecryptTamperedNonceFails(t *testing.T) {
-	key, err := DeriveKey("passphrase", []byte("0123456789abcdef"))
+	key, err := DeriveKey("passphrase", []byte("0123456789abcdef"), testParams)
 	if err != nil {
 		t.Fatalf("derive key: %v", err)
 	}
@@ -145,6 +149,13 @@ func TestDecryptTamperedNonceFails(t *testing.T) {
 
 	if _, err := Decrypt(key, tampered, ciphertext); err == nil {
 		t.Fatalf("expected decrypt with tampered nonce to fail")
+	}
+}
+
+func TestDefaultParamsStrongerThanScryptInteractiveDefault(t *testing.T) {
+	params := DefaultParams()
+	if params.N <= 1<<15 {
+		t.Fatalf("expected N stronger than scrypt's 2009 interactive default (1<<15), got %d", params.N)
 	}
 }
 

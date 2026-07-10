@@ -25,6 +25,14 @@ type Store struct {
 	db *sql.DB
 }
 
+// KDFParams holds the scrypt work-factor parameters a database's KDF salt
+// was created with. Store persists these alongside the salt but has no
+// opinion on what they mean cryptographically - that's internal/crypto's
+// job.
+type KDFParams struct {
+	N, R, P int
+}
+
 // Open opens (creating if necessary) the SQLite database at path, ensures
 // its schema exists, and locks the file down to owner-only permissions.
 func Open(path string) (*Store, error) {
@@ -52,7 +60,10 @@ func (s *Store) migrate() error {
 	_, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS meta (
 			id       INTEGER PRIMARY KEY CHECK (id = 1),
-			kdf_salt BLOB NOT NULL
+			kdf_salt BLOB NOT NULL,
+			kdf_n    INTEGER NOT NULL DEFAULT 32768,
+			kdf_r    INTEGER NOT NULL DEFAULT 8,
+			kdf_p    INTEGER NOT NULL DEFAULT 1
 		);
 		CREATE TABLE IF NOT EXISTS snapshots (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,59 +79,110 @@ func (s *Store) migrate() error {
 	if err != nil {
 		return fmt.Errorf("migrate schema: %w", err)
 	}
+	// Databases created before kdf_n/kdf_r/kdf_p existed have a meta table
+	// without them; CREATE TABLE IF NOT EXISTS above is a no-op there, so
+	// add the columns explicitly. The DEFAULT above matches the scrypt
+	// parameters those older databases were actually created with (scrypt's
+	// 2009 "interactive" defaults), so existing keys keep re-deriving
+	// correctly.
+	return s.addMissingKDFColumns()
+}
+
+func (s *Store) addMissingKDFColumns() error {
+	rows, err := s.db.Query(`PRAGMA table_info(meta)`)
+	if err != nil {
+		return fmt.Errorf("inspect meta schema: %w", err)
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notNull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("read meta schema: %w", err)
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate meta schema: %w", err)
+	}
+	rows.Close()
+
+	for _, col := range []struct{ name, ddl string }{
+		{"kdf_n", `ALTER TABLE meta ADD COLUMN kdf_n INTEGER NOT NULL DEFAULT 32768`},
+		{"kdf_r", `ALTER TABLE meta ADD COLUMN kdf_r INTEGER NOT NULL DEFAULT 8`},
+		{"kdf_p", `ALTER TABLE meta ADD COLUMN kdf_p INTEGER NOT NULL DEFAULT 1`},
+	} {
+		if have[col.name] {
+			continue
+		}
+		if _, err := s.db.Exec(col.ddl); err != nil {
+			return fmt.Errorf("add %s column: %w", col.name, err)
+		}
+	}
 	return nil
 }
 
-// readSalt returns the database's stored KDF salt, or sql.ErrNoRows if none
-// has been stored yet.
-func (s *Store) readSalt() ([]byte, error) {
+// readSalt returns the database's stored KDF salt and parameters, or
+// sql.ErrNoRows if none has been stored yet.
+func (s *Store) readSalt() ([]byte, KDFParams, error) {
 	var salt []byte
-	err := s.db.QueryRow(`SELECT kdf_salt FROM meta WHERE id = 1`).Scan(&salt)
+	var params KDFParams
+	err := s.db.QueryRow(`SELECT kdf_salt, kdf_n, kdf_r, kdf_p FROM meta WHERE id = 1`).
+		Scan(&salt, &params.N, &params.R, &params.P)
 	if err != nil {
-		return nil, err
+		return nil, KDFParams{}, err
 	}
-	return salt, nil
+	return salt, params, nil
 }
 
-// EnsureSalt returns the database's KDF salt, generating and persisting one
+// EnsureSalt returns the database's KDF salt and the parameters it was
+// derived under, generating and persisting a new salt under defaultParams
 // on first use so every subsequent run derives the same key from a given
 // passphrase.
-func (s *Store) EnsureSalt(generate func() ([]byte, error)) ([]byte, error) {
-	salt, err := s.readSalt()
+func (s *Store) EnsureSalt(generate func() ([]byte, error), defaultParams KDFParams) ([]byte, KDFParams, error) {
+	salt, params, err := s.readSalt()
 	if err == nil {
-		return salt, nil
+		return salt, params, nil
 	}
 	if err != sql.ErrNoRows {
-		return nil, fmt.Errorf("read kdf salt: %w", err)
+		return nil, KDFParams{}, fmt.Errorf("read kdf salt: %w", err)
 	}
 	salt, err = generate()
 	if err != nil {
-		return nil, err
+		return nil, KDFParams{}, err
 	}
-	if _, err := s.db.Exec(`INSERT INTO meta (id, kdf_salt) VALUES (1, ?)`, salt); err != nil {
-		return nil, fmt.Errorf("store kdf salt: %w", err)
+	if _, err := s.db.Exec(
+		`INSERT INTO meta (id, kdf_salt, kdf_n, kdf_r, kdf_p) VALUES (1, ?, ?, ?, ?)`,
+		salt, defaultParams.N, defaultParams.R, defaultParams.P,
+	); err != nil {
+		return nil, KDFParams{}, fmt.Errorf("store kdf salt: %w", err)
 	}
-	return salt, nil
+	return salt, defaultParams, nil
 }
 
-// CurrentSalt returns the database's KDF salt, or an error if none has been
-// stored yet (i.e. backup has never run against this database).
-func (s *Store) CurrentSalt() ([]byte, error) {
-	salt, err := s.readSalt()
+// CurrentSalt returns the database's KDF salt and parameters, or an error if
+// none has been stored yet (i.e. backup has never run against this
+// database).
+func (s *Store) CurrentSalt() ([]byte, KDFParams, error) {
+	salt, params, err := s.readSalt()
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("no backups exist yet; nothing to rotate")
+		return nil, KDFParams{}, fmt.Errorf("no backups exist yet; nothing to rotate")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read kdf salt: %w", err)
+		return nil, KDFParams{}, fmt.Errorf("read kdf salt: %w", err)
 	}
-	return salt, nil
+	return salt, params, nil
 }
 
-// RotateKey re-encrypts every snapshot and replaces the stored KDF salt
-// inside a single transaction: either every row and the salt update
-// succeed, or none of them do. reencrypt is called once per snapshot and
-// must return the new nonce/ciphertext for newSalt's key.
-func (s *Store) RotateKey(newSalt []byte, reencrypt func(Snapshot) (nonce, ciphertext []byte, err error)) (int, error) {
+// RotateKey re-encrypts every snapshot and replaces the stored KDF salt and
+// parameters inside a single transaction: either every row and the salt
+// update succeed, or none of them do. reencrypt is called once per snapshot
+// and must return the new nonce/ciphertext for newSalt's key.
+func (s *Store) RotateKey(newSalt []byte, newParams KDFParams, reencrypt func(Snapshot) (nonce, ciphertext []byte, err error)) (int, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("begin rotation: %w", err)
@@ -160,7 +222,10 @@ func (s *Store) RotateKey(newSalt []byte, reencrypt func(Snapshot) (nonce, ciphe
 		}
 	}
 
-	if _, err := tx.Exec(`UPDATE meta SET kdf_salt = ? WHERE id = 1`, newSalt); err != nil {
+	if _, err := tx.Exec(
+		`UPDATE meta SET kdf_salt = ?, kdf_n = ?, kdf_r = ?, kdf_p = ? WHERE id = 1`,
+		newSalt, newParams.N, newParams.R, newParams.P,
+	); err != nil {
 		tx.Rollback()
 		return 0, fmt.Errorf("update kdf salt: %w", err)
 	}
