@@ -1,6 +1,5 @@
 /doppler-backup
 /bin/
 *.db
-/build.sh
 /testresults/
 /godocs/
