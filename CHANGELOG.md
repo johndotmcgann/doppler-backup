@@ -5,6 +5,38 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Interactive passphrase prompt: `--passphrase` (and
+  `--old-passphrase`/`--new-passphrase` for `rotate`) are no longer
+  required flags. When omitted and stdin is a terminal, the CLI prompts
+  for the passphrase without echoing input; `rotate`'s new passphrase is
+  confirmed by prompting twice. A blank prompt entry, or a
+  non-interactive stdin (e.g. cron) without the flag, falls back to a
+  fixed default passphrase (`doppler_backup`) so existing scripted usage
+  keeps working unattended.
+
+### Changed
+
+- `make build`/`make install` now stamp a real version via
+  `-ldflags -X main.Version=...` (derived from `git describe`), matching
+  what `build.sh` already did. Previously the documented `make build`
+  path always reported `version dev`.
+- `build.sh` is now committed to the repository instead of being
+  gitignored, so version injection, vet/test gating, and doc generation
+  for releases are reviewable and reproducible. The `$HOME/Executables`
+  copy step is now opt-in via `INSTALL_LOCAL=1`.
+
+### Fixed
+
+- `build.sh`'s test-results capture (`testresults/*.json`) no longer
+  produces an empty file on a failing test run. It now tees `go test
+  -json` output through `pipefail` (previously a plain `sh` redirect
+  couldn't trip `set -e` on failure) and only creates the results file
+  after `go vet` passes.
+
 ## [0.4.0] - 2026-07-09
 
 ### Changed
