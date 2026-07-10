@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `restore`'s decrypted-secrets temp file now prefers `/dev/shm` (tmpfs)
+  over disk when available, and a `SIGINT`/`SIGTERM` handler removes it
+  if the process is interrupted mid-restore. `SIGKILL`/hard crashes can
+  still leave it behind — documented in the README.
+- Deduplicated salt-reading in `internal/store` (`readSalt()` shared by
+  `EnsureSalt`/`CurrentSalt`) and store-open-plus-key-derivation in
+  `cmd/doppler-backup` (`openStoreAndKey()` shared by `backup`/`restore`).
+- Bumped `go` directive to 1.26.5 and `golang.org/x/crypto` to v0.54.0
+  (pulling `golang.org/x/term` to v0.45.0 and `golang.org/x/sys` to
+  v0.47.0), closing two disclosed-but-unreached Go stdlib CVEs.
+
+### Removed
+
+- Vestigial `/doppler-backup` rule from `.gitignore`; the Makefile has
+  always built to `bin/doppler-backup`, already covered by `/bin/`.
+
 ## [0.5.0] - 2026-07-10
 
 ### Added
