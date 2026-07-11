@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -23,9 +24,43 @@ var Version = "dev"
 
 var dbPath string
 
-// defaultPassphrase is used when no --passphrase flag is given and the user
-// enters nothing at the interactive prompt.
-const defaultPassphrase = "doppler_backup"
+// minPassphraseLength is the floor enforced on passphrases used to encrypt
+// new data (backup, rotate's new passphrase). This passphrase is fed
+// directly into scrypt and protects a static SQLite file that an attacker
+// with a copy can brute-force fully offline, with no rate limiting or
+// lockout — a materially worse threat model than an online login password
+// (which is what NIST 800-63B's 8-character floor is calibrated for), so a
+// longer floor is warranted here. Per current guidance, length rather than
+// character-class complexity is what matters for resisting offline
+// brute-force, so no uppercase/digit/symbol rules are enforced. This floor
+// works alongside crypto.DefaultParams' scrypt N=1<<17, which adds
+// per-guess cost on top of it.
+const minPassphraseLength = 12
+
+// validatePassphraseStrength enforces minPassphraseLength on passphrases
+// that will be used to encrypt new data. It is deliberately not applied to
+// passphrases used only to decrypt existing data, since a database may
+// have been created before this floor existed.
+func validatePassphraseStrength(pass string) error {
+	n := utf8.RuneCountInString(pass)
+	if n < minPassphraseLength {
+		return fmt.Errorf(
+			"passphrase must be at least %d characters (got %d) — length, not complexity, "+
+				"is what protects against offline brute force; use a long random passphrase "+
+				"from a password manager, or a multi-word Diceware-style phrase",
+			minPassphraseLength, n)
+	}
+	return nil
+}
+
+// errPassphraseRequired reports that no passphrase was given and stdin
+// isn't a terminal to prompt on, so the caller must pass flagName
+// explicitly (e.g. for cron/unattended use).
+func errPassphraseRequired(flagName string) error {
+	return fmt.Errorf(
+		"no passphrase given and stdin is not a terminal (e.g. running under cron): "+
+			"pass %s explicitly for unattended use", flagName)
+}
 
 // dopplerClient is the subset of *doppler.Client used by the run* functions
 // below. It exists so tests can substitute a fake implementation instead of
@@ -55,42 +90,78 @@ func main() {
 	}
 }
 
-// resolvePassphrase returns flagValue if set. Otherwise, if stdin is a
-// terminal, it prompts interactively without echoing input; an empty entry
-// (or a non-interactive stdin, e.g. cron) falls back to defaultPassphrase.
-func resolvePassphrase(flagValue, promptLabel string) (string, error) {
+// resolvePassphrase resolves a passphrase used only to decrypt existing
+// data. It returns flagValue if set. Otherwise, if stdin is a terminal, it
+// prompts interactively without echoing input; a blank entry is an error.
+// If stdin isn't a terminal (e.g. cron) and no flag was given, it errors
+// rather than prompting. It deliberately does not enforce
+// minPassphraseLength, because the database may have been created under a
+// shorter passphrase before length enforcement existed.
+func resolvePassphrase(flagValue, promptLabel, flagName string) (string, error) {
 	if flagValue != "" {
 		return flagValue, nil
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return defaultPassphrase, nil
+		return "", errPassphraseRequired(flagName)
 	}
-	pass, err := readPassword(promptLabel + " (blank for default)")
+	pass, err := readPassword(promptLabel)
 	if err != nil {
 		return "", err
 	}
 	if pass == "" {
-		return defaultPassphrase, nil
+		return "", fmt.Errorf("passphrase must not be blank")
 	}
 	return pass, nil
 }
 
-// resolveNewPassphrase behaves like resolvePassphrase, except when prompting
-// interactively it asks for the new passphrase twice and requires the two
-// entries to match, guarding against a typo locking the database.
-func resolveNewPassphrase(flagValue string) (string, error) {
+// resolveEncryptPassphrase behaves like resolvePassphrase, but is used for
+// passphrases that will encrypt new data (backup), so it additionally
+// enforces minPassphraseLength on both the flag and the prompt path.
+func resolveEncryptPassphrase(flagValue, promptLabel, flagName string) (string, error) {
 	if flagValue != "" {
+		if err := validatePassphraseStrength(flagValue); err != nil {
+			return "", err
+		}
 		return flagValue, nil
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return defaultPassphrase, nil
+		return "", errPassphraseRequired(flagName)
 	}
-	first, err := readPassword("New passphrase (blank for default)")
+	pass, err := readPassword(promptLabel)
+	if err != nil {
+		return "", err
+	}
+	if pass == "" {
+		return "", fmt.Errorf("passphrase must not be blank")
+	}
+	if err := validatePassphraseStrength(pass); err != nil {
+		return "", err
+	}
+	return pass, nil
+}
+
+// resolveNewPassphrase behaves like resolveEncryptPassphrase, except when
+// prompting interactively it asks for the new passphrase twice and requires
+// the two entries to match, guarding against a typo locking the database.
+func resolveNewPassphrase(flagValue string) (string, error) {
+	if flagValue != "" {
+		if err := validatePassphraseStrength(flagValue); err != nil {
+			return "", err
+		}
+		return flagValue, nil
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", errPassphraseRequired("--new-passphrase")
+	}
+	first, err := readPassword("New passphrase")
 	if err != nil {
 		return "", err
 	}
 	if first == "" {
-		return defaultPassphrase, nil
+		return "", fmt.Errorf("passphrase must not be blank")
+	}
+	if err := validatePassphraseStrength(first); err != nil {
+		return "", err
 	}
 	confirm, err := readPassword("Confirm new passphrase")
 	if err != nil {
@@ -120,7 +191,7 @@ func newBackupCmd() *cobra.Command {
 		Use:   "backup",
 		Short: "Snapshot secrets for all projects (or one, with --project) into the backup database",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pass, err := resolvePassphrase(passphrase, "Passphrase")
+			pass, err := resolveEncryptPassphrase(passphrase, "Passphrase", "--passphrase")
 			if err != nil {
 				return err
 			}
@@ -128,7 +199,7 @@ func newBackupCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", "", "limit backup to a single project (default: all projects)")
-	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase used to encrypt secrets at rest (prompts interactively if omitted; defaults to \"doppler_backup\" if left blank)")
+	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase used to encrypt secrets at rest — required (min 12 characters); prompts interactively if omitted, or pass this flag explicitly for non-interactive/cron use")
 	return cmd
 }
 
@@ -223,7 +294,7 @@ func newRestoreCmd() *cobra.Command {
 		Use:   "restore",
 		Short: "Restore a project/config's secrets from the most recent (or a specific) snapshot",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pass, err := resolvePassphrase(passphrase, "Passphrase")
+			pass, err := resolvePassphrase(passphrase, "Passphrase", "--passphrase")
 			if err != nil {
 				return err
 			}
@@ -232,7 +303,7 @@ func newRestoreCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&project, "project", "", "project to restore into (required)")
 	cmd.Flags().StringVar(&config, "config", "", "config to restore into (required)")
-	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase used to decrypt the snapshot (prompts interactively if omitted; defaults to \"doppler_backup\" if left blank)")
+	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase used to decrypt the snapshot — required; prompts interactively if omitted, or pass this flag explicitly for non-interactive/cron use")
 	cmd.Flags().Int64Var(&snapshotID, "snapshot", 0, "specific snapshot id to restore (default: latest for project/config)")
 	cmd.MarkFlagRequired("project")
 	cmd.MarkFlagRequired("config")
@@ -365,7 +436,7 @@ func newRotateCmd() *cobra.Command {
 		Use:   "rotate",
 		Short: "Re-encrypt every snapshot under a new passphrase, invalidating the old one",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			oldPass, err := resolvePassphrase(oldPassphrase, "Current passphrase")
+			oldPass, err := resolvePassphrase(oldPassphrase, "Current passphrase", "--old-passphrase")
 			if err != nil {
 				return err
 			}
@@ -376,8 +447,8 @@ func newRotateCmd() *cobra.Command {
 			return runRotate(oldPass, newPass)
 		},
 	}
-	cmd.Flags().StringVar(&oldPassphrase, "old-passphrase", "", "current passphrase used to decrypt existing snapshots (prompts interactively if omitted; defaults to \"doppler_backup\" if left blank)")
-	cmd.Flags().StringVar(&newPassphrase, "new-passphrase", "", "new passphrase to re-encrypt snapshots with (prompts interactively if omitted, with confirmation; defaults to \"doppler_backup\" if left blank)")
+	cmd.Flags().StringVar(&oldPassphrase, "old-passphrase", "", "current passphrase used to decrypt existing snapshots — required; prompts interactively if omitted, or pass this flag explicitly for non-interactive/cron use")
+	cmd.Flags().StringVar(&newPassphrase, "new-passphrase", "", "new passphrase to re-encrypt snapshots with — required (min 12 characters); prompts interactively with confirmation if omitted, or pass this flag explicitly for non-interactive/cron use")
 	return cmd
 }
 

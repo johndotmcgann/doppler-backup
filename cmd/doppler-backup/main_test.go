@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -526,8 +527,9 @@ func TestCopyFileFailsOnExistingDestination(t *testing.T) {
 
 func TestRequiredFlagsEnforced(t *testing.T) {
 	// --passphrase is intentionally not required on any command: omitting
-	// it falls back to an interactive prompt, or defaultPassphrase when
-	// stdin isn't a terminal (see TestResolvePassphrase).
+	// it falls back to an interactive prompt, or errors when stdin isn't a
+	// terminal (see TestResolvePassphrase / TestResolveEncryptPassphrase /
+	// TestResolveNewPassphrase).
 	restoreCmd := newRestoreCmd()
 	restoreCmd.SetArgs([]string{"--project", "p"})
 	restoreCmd.SilenceUsage = true
@@ -537,29 +539,105 @@ func TestRequiredFlagsEnforced(t *testing.T) {
 	}
 }
 
+// TestNonInteractivePassphraseRequired exercises each subcommand's RunE
+// end-to-end with no passphrase flag set. go test's stdin isn't a
+// terminal, so each should error rather than fall back to a default or
+// block on a prompt. This also covers rotate, closing the gap noted (but
+// marked moot, since F04 removed rotate's required-flag enforcement
+// entirely) as F06 in TECH_DEBT_AUDIT.md.
+func TestNonInteractivePassphraseRequired(t *testing.T) {
+	setTestDB(t)
+
+	backupCmd := newBackupCmd()
+	backupCmd.SetArgs([]string{})
+	backupCmd.SilenceUsage = true
+	backupCmd.SilenceErrors = true
+	if err := backupCmd.Execute(); err == nil {
+		t.Fatalf("expected error when backup has no passphrase and stdin isn't a terminal")
+	}
+
+	restoreCmd := newRestoreCmd()
+	restoreCmd.SetArgs([]string{"--project", "p", "--config", "c"})
+	restoreCmd.SilenceUsage = true
+	restoreCmd.SilenceErrors = true
+	if err := restoreCmd.Execute(); err == nil {
+		t.Fatalf("expected error when restore has no passphrase and stdin isn't a terminal")
+	}
+
+	rotateCmd := newRotateCmd()
+	rotateCmd.SetArgs([]string{})
+	rotateCmd.SilenceUsage = true
+	rotateCmd.SilenceErrors = true
+	if err := rotateCmd.Execute(); err == nil {
+		t.Fatalf("expected error when rotate has no passphrase and stdin isn't a terminal")
+	}
+}
+
 func TestResolvePassphrase(t *testing.T) {
-	pass, err := resolvePassphrase("explicit", "Passphrase")
+	pass, err := resolvePassphrase("explicit", "Passphrase", "--passphrase")
 	if err != nil || pass != "explicit" {
 		t.Fatalf("expected explicit flag value to win, got %q, %v", pass, err)
 	}
 
-	// go test's stdin isn't a terminal, so an empty flag falls back to the
-	// default passphrase without blocking on a prompt.
-	pass, err = resolvePassphrase("", "Passphrase")
-	if err != nil || pass != defaultPassphrase {
-		t.Fatalf("expected default passphrase for non-interactive stdin, got %q, %v", pass, err)
+	// go test's stdin isn't a terminal, so an empty flag errors rather than
+	// falling back to a default or blocking on a prompt.
+	if _, err := resolvePassphrase("", "Passphrase", "--passphrase"); err == nil {
+		t.Fatalf("expected error for non-interactive stdin with no flag")
+	}
+
+	// resolvePassphrase is decrypt-only and deliberately does not enforce
+	// minPassphraseLength, since the database may predate that floor.
+	pass, err = resolvePassphrase("short", "Passphrase", "--passphrase")
+	if err != nil || pass != "short" {
+		t.Fatalf("expected short flag value to pass through unchanged, got %q, %v", pass, err)
+	}
+}
+
+func TestResolveEncryptPassphrase(t *testing.T) {
+	pass, err := resolveEncryptPassphrase("explicit-long-enough", "Passphrase", "--passphrase")
+	if err != nil || pass != "explicit-long-enough" {
+		t.Fatalf("expected explicit flag value to win, got %q, %v", pass, err)
+	}
+
+	if _, err := resolveEncryptPassphrase("short", "Passphrase", "--passphrase"); err == nil {
+		t.Fatalf("expected error for a too-short passphrase")
+	}
+
+	if _, err := resolveEncryptPassphrase("", "Passphrase", "--passphrase"); err == nil {
+		t.Fatalf("expected error for non-interactive stdin with no flag")
 	}
 }
 
 func TestResolveNewPassphrase(t *testing.T) {
-	pass, err := resolveNewPassphrase("explicit")
-	if err != nil || pass != "explicit" {
+	pass, err := resolveNewPassphrase("explicit-long-enough")
+	if err != nil || pass != "explicit-long-enough" {
 		t.Fatalf("expected explicit flag value to win, got %q, %v", pass, err)
 	}
 
-	pass, err = resolveNewPassphrase("")
-	if err != nil || pass != defaultPassphrase {
-		t.Fatalf("expected default passphrase for non-interactive stdin, got %q, %v", pass, err)
+	if _, err := resolveNewPassphrase("short"); err == nil {
+		t.Fatalf("expected error for a too-short passphrase")
+	}
+
+	if _, err := resolveNewPassphrase(""); err == nil {
+		t.Fatalf("expected error for non-interactive stdin with no flag")
+	}
+}
+
+func TestValidatePassphraseStrength(t *testing.T) {
+	if err := validatePassphraseStrength("123456789012"); err != nil {
+		t.Fatalf("expected exactly minPassphraseLength runes to pass, got %v", err)
+	}
+	if err := validatePassphraseStrength("12345678901"); err == nil {
+		t.Fatalf("expected one rune short of minPassphraseLength to fail")
+	}
+	if err := validatePassphraseStrength(""); err == nil {
+		t.Fatalf("expected empty passphrase to fail")
+	}
+	// Multi-byte runes (é is 2 bytes in UTF-8) must be counted by rune, not
+	// byte length: 12 é's is 24 bytes but exactly 12 runes.
+	multiByte := strings.Repeat("é", minPassphraseLength)
+	if err := validatePassphraseStrength(multiByte); err != nil {
+		t.Fatalf("expected %d multi-byte runes to satisfy the minimum, got %v", minPassphraseLength, err)
 	}
 }
 

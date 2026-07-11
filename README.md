@@ -28,11 +28,25 @@ All commands accept `--db PATH` to choose the SQLite database file
 (default `./doppler-backup.db`). The database is created automatically on
 first use and locked down to owner-only (`0600`) permissions.
 
-`--passphrase` (and `--old-passphrase`/`--new-passphrase` for `rotate`) is
-optional. If omitted and run from a terminal, you'll be prompted for it
-without the input being echoed back; leaving that prompt blank, or running
-non-interactively (e.g. from cron) without the flag, falls back to the
-default passphrase `doppler_backup`.
+A passphrase is always required to encrypt or decrypt the backup database —
+there is no default and no environment-variable fallback. Pass it via
+`--passphrase` (or `--old-passphrase`/`--new-passphrase` for `rotate`), or
+omit the flag when running interactively to be prompted for it without the
+input being echoed back. Running non-interactively (e.g. from cron) without
+the flag is an error, so unattended use must always pass the flag
+explicitly.
+
+Passphrases used to **encrypt** (`backup`, and `rotate`'s
+`--new-passphrase`) must be at least 12 characters. Length, not
+character-class complexity, is what protects against offline brute force
+here — this passphrase feeds directly into scrypt and protects a static
+file an attacker with a copy can attack with no rate limiting — so a long
+random passphrase from a password manager, or a multi-word Diceware-style
+phrase, is both easier to type and stronger than a short "complex" one.
+Passphrases used only to **decrypt** existing data (`restore`, and
+`rotate`'s `--old-passphrase`) are accepted as-is regardless of length, so
+databases created before this minimum was introduced remain restorable; run
+`rotate` to move such a database onto a compliant new passphrase.
 
 ### Backup
 
