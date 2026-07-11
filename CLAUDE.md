@@ -38,7 +38,10 @@ Three packages under `internal/`, each with a single responsibility, wired toget
   swappable `runFunc` field so tests can fake CLI output without shelling out. Handles
   pagination (100/page) for `ListProjects`/`ListConfigs`, and strips Doppler's computed
   `DOPPLER_PROJECT`/`DOPPLER_CONFIG`/`DOPPLER_ENVIRONMENT` keys from downloaded secrets
-  since they describe the target config rather than being real secret data.
+  since they describe the target config rather than being real secret data. `MinVersion`
+  pins the oldest doppler CLI version this tool is verified against; `CheckMinVersion` is
+  enforced at the top of `backup`/`restore` in `main.go` (via `dopplerClient.Version()`) so
+  a too-old CLI fails fast instead of producing a confusing JSON-parse error later.
 - **`internal/crypto`**: passphrase-based encryption only — never touches Doppler or SQLite.
   A random salt (`GenerateSalt`) is generated once per database and stored in the `meta`
   table; `DeriveKey` runs scrypt(passphrase, salt) to get a 32-byte AES key each run.

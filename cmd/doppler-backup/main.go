@@ -70,6 +70,19 @@ type dopplerClient interface {
 	ListConfigs(project string) ([]doppler.Config, error)
 	DownloadSecrets(project, config string) (map[string]string, error)
 	UploadSecrets(project, config, path string) error
+	Version() (string, error)
+}
+
+// checkDopplerVersion verifies the doppler CLI on PATH meets
+// doppler.MinVersion before backup/restore does any other work, so a
+// too-old CLI fails fast with a clear message instead of a confusing
+// JSON-parse error later.
+func checkDopplerVersion(client dopplerClient) error {
+	v, err := client.Version()
+	if err != nil {
+		return err
+	}
+	return doppler.CheckMinVersion(v)
 }
 
 func main() {
@@ -229,6 +242,10 @@ func openStoreAndKey(passphrase string) (*store.Store, []byte, error) {
 }
 
 func runBackupWithClient(client dopplerClient, project, passphrase string) error {
+	if err := checkDopplerVersion(client); err != nil {
+		return err
+	}
+
 	st, key, err := openStoreAndKey(passphrase)
 	if err != nil {
 		return err
@@ -326,6 +343,10 @@ func plaintextTempDir() string {
 }
 
 func runRestoreWithClient(client dopplerClient, project, config, passphrase string, snapshotID int64) error {
+	if err := checkDopplerVersion(client); err != nil {
+		return err
+	}
+
 	st, key, err := openStoreAndKey(passphrase)
 	if err != nil {
 		return err

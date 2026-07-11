@@ -7,9 +7,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
+	"strings"
 )
 
 const pageSize = 100
+
+// MinVersion is the oldest doppler CLI version this tool is developed and
+// tested against. CheckMinVersion enforces it as a floor, since the JSON
+// output shapes this package parses (projects/configs/secrets) could change
+// upstream without this tool noticing otherwise.
+const MinVersion = "3.76.0"
 
 // computedKeys are read-only values Doppler injects into every download;
 // they describe the target config rather than being real secrets, so they
@@ -116,6 +124,63 @@ func (c *Client) DownloadSecrets(project, config string) (map[string]string, err
 func (c *Client) UploadSecrets(project, config, path string) error {
 	if _, err := c.run("secrets", "upload", path, "-p", project, "-c", config); err != nil {
 		return fmt.Errorf("upload secrets to %s/%s: %w", project, config, err)
+	}
+	return nil
+}
+
+// Version returns the installed doppler CLI's version, e.g. "3.76.0".
+func (c *Client) Version() (string, error) {
+	out, err := c.run("--version")
+	if err != nil {
+		return "", fmt.Errorf("doppler CLI version: %w", err)
+	}
+	v := strings.TrimSpace(string(out))
+	v = strings.TrimPrefix(v, "v")
+	return v, nil
+}
+
+// parseVersion parses a "major.minor.patch" string into its three integer
+// components.
+func parseVersion(v string) ([3]int, error) {
+	var out [3]int
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return out, fmt.Errorf("expected major.minor.patch, got %q", v)
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return out, fmt.Errorf("expected major.minor.patch, got %q", v)
+		}
+		out[i] = n
+	}
+	return out, nil
+}
+
+// CheckMinVersion returns an error unless installed parses as a version
+// greater than or equal to MinVersion.
+func CheckMinVersion(installed string) error {
+	got, err := parseVersion(installed)
+	if err != nil {
+		return fmt.Errorf(
+			"could not parse doppler CLI version %q; doppler CLI %s or newer is required "+
+				"— upgrade with your package manager or see https://docs.doppler.com/docs/install-cli",
+			installed, MinVersion)
+	}
+	want, err := parseVersion(MinVersion)
+	if err != nil {
+		return fmt.Errorf("parse MinVersion %q: %w", MinVersion, err)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			if got[i] > want[i] {
+				return nil
+			}
+			return fmt.Errorf(
+				"doppler CLI %s or newer is required (found %s) — upgrade with your package "+
+					"manager or see https://docs.doppler.com/docs/install-cli",
+				MinVersion, installed)
+		}
 	}
 	return nil
 }

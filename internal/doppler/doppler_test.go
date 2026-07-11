@@ -144,6 +144,60 @@ func TestUploadSecretsPropagatesRunError(t *testing.T) {
 	}
 }
 
+func TestVersionTrimsVPrefix(t *testing.T) {
+	c := &Client{runFunc: func(args ...string) ([]byte, error) {
+		return []byte("v3.76.0\n"), nil
+	}}
+
+	got, err := c.Version()
+	if err != nil {
+		t.Fatalf("version: %v", err)
+	}
+	if got != "3.76.0" {
+		t.Fatalf("expected %q, got %q", "3.76.0", got)
+	}
+}
+
+func TestVersionPropagatesRunError(t *testing.T) {
+	wantErr := errors.New("boom")
+	c := &Client{runFunc: func(args ...string) ([]byte, error) {
+		return nil, wantErr
+	}}
+
+	if _, err := c.Version(); !errors.Is(err, wantErr) {
+		t.Fatalf("expected wrapped %v, got %v", wantErr, err)
+	}
+}
+
+func TestCheckMinVersion(t *testing.T) {
+	tests := []struct {
+		name      string
+		installed string
+		wantErr   bool
+	}{
+		{"equal to min", MinVersion, false},
+		{"newer major", "4.0.0", false},
+		{"newer minor", "3.77.0", false},
+		{"newer patch", "3.76.1", false},
+		{"older major", "2.99.99", true},
+		{"older minor", "3.75.99", true},
+		{"malformed", "not-a-version", true},
+		{"malformed trailing garbage", "3.76.0-beta", true},
+		{"empty", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := CheckMinVersion(tt.installed)
+			if tt.wantErr && err == nil {
+				t.Fatalf("expected error for installed=%q", tt.installed)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("expected no error for installed=%q, got %v", tt.installed, err)
+			}
+		})
+	}
+}
+
 // TestRunDopplerCapturesStdoutAndStderr exercises the real exec.Command
 // plumbing in runDoppler (not just the higher-level fakes above) against a
 // fixture script installed as "doppler" on PATH.

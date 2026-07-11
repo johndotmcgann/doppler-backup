@@ -44,6 +44,8 @@ type fakeClient struct {
 	uploadedContent    []byte
 	uploadedPath       string
 	uploadErr          error
+	version            string
+	versionErr         error
 }
 
 func (f *fakeClient) ListProjects() ([]doppler.Project, error) {
@@ -81,6 +83,16 @@ func (f *fakeClient) UploadSecrets(project, config, path string) error {
 	f.uploadedContent = content
 	f.uploadedPath = path
 	return nil
+}
+
+func (f *fakeClient) Version() (string, error) {
+	if f.versionErr != nil {
+		return "", f.versionErr
+	}
+	if f.version != "" {
+		return f.version, nil
+	}
+	return doppler.MinVersion, nil
 }
 
 func TestRunBackupWithClientAllProjects(t *testing.T) {
@@ -180,6 +192,32 @@ func TestRunBackupWithClientAllFailReturnsError(t *testing.T) {
 
 	if err := runBackupWithClient(client, "", "passphrase"); err == nil {
 		t.Fatalf("expected error when every backup fails")
+	}
+}
+
+func TestRunBackupWithClientTooOldVersionFailsFast(t *testing.T) {
+	setTestDB(t)
+
+	client := &fakeClient{
+		version:         "3.0.0",
+		listProjectsErr: errors.New("ListProjects should not be called when the version check fails"),
+	}
+
+	if err := runBackupWithClient(client, "", "passphrase"); err == nil {
+		t.Fatalf("expected error for too-old doppler CLI version")
+	}
+}
+
+func TestRunRestoreWithClientTooOldVersionFailsFast(t *testing.T) {
+	setTestDB(t)
+
+	client := &fakeClient{version: "3.0.0"}
+
+	if err := runRestoreWithClient(client, "proj", "dev", "passphrase", 0); err == nil {
+		t.Fatalf("expected error for too-old doppler CLI version")
+	}
+	if client.uploadedProject != "" {
+		t.Fatalf("expected UploadSecrets to not be called when the version check fails")
 	}
 }
 
@@ -333,6 +371,7 @@ func (c *slowUploadClient) UploadSecrets(_, _, path string) error {
 	time.Sleep(3 * time.Second)
 	return nil
 }
+func (c *slowUploadClient) Version() (string, error) { return doppler.MinVersion, nil }
 
 func TestPlaintextTempDirPrefersTmpfs(t *testing.T) {
 	dir := plaintextTempDir()
