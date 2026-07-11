@@ -22,6 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remain unrestricted so databases created before this change stay
   restorable.
 
+## [0.7.0] - 2026-07-10
+
+### Changed
+
+- `crypto.DefaultParams()` scrypt work factor raised from `N = 1<<15`
+  (scrypt's 2009 "interactive" default) to `N = 1<<17`. KDF parameters
+  (`N`/`R`/`P`) are now persisted alongside the salt in the `meta` table
+  instead of hardcoded, so each database re-derives its key with whatever
+  parameters it was actually created under. Pre-existing databases are
+  backfilled to the old constants (`32768/8/1`) on open, so already-stored
+  snapshots keep decrypting without requiring `rotate`; only new databases
+  (or ones that go through `rotate`) get the stronger work factor.
+
 ## [0.6.0] - 2026-07-10
 
 ### Changed
