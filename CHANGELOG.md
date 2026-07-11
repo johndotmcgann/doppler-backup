@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- Default-passphrase fallback (`doppler_backup`): omitting `--passphrase`
+  (or `--old-passphrase`/`--new-passphrase` for `rotate`) now prompts
+  interactively, or errors when run non-interactively (e.g. cron), instead
+  of silently encrypting under a guessable constant.
+
+### Added
+
+- Minimum passphrase length (12 characters) enforced for passphrases that
+  encrypt new data (`backup`, `rotate --new-passphrase`). Passphrases used
+  only to decrypt existing data (`restore`, `rotate --old-passphrase`)
+  remain unrestricted so databases created before this change stay
+  restorable.
+
 ## [0.6.0] - 2026-07-10
 
 ### Changed
