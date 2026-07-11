@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-11
+
+### Added
+
+- Minimum Doppler CLI version check (3.76.0): `backup` and `restore` now
+  fail fast with a clear error if the installed `doppler` binary is older
+  than this or its `--version` output can't be parsed, instead of hitting a
+  confusing JSON-parse error deeper in the run.
+
+## [0.8.0] - 2026-07-11
+
 ### Removed
 
 - Default-passphrase fallback (`doppler_backup`): omitting `--passphrase`
@@ -21,10 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only to decrypt existing data (`restore`, `rotate --old-passphrase`)
   remain unrestricted so databases created before this change stay
   restorable.
-- Minimum Doppler CLI version check (3.76.0): `backup` and `restore` now
-  fail fast with a clear error if the installed `doppler` binary is older
-  than this or its `--version` output can't be parsed, instead of hitting a
-  confusing JSON-parse error deeper in the run.
 
 ## [0.7.0] - 2026-07-10
 
@@ -129,6 +136,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Version injection for production builds via `build.sh`.
 - README with usage instructions and MIT license.
 
+[0.9.0]: https://github.com/johndotmcgann/doppler-backup/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/johndotmcgann/doppler-backup/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/johndotmcgann/doppler-backup/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/johndotmcgann/doppler-backup/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/johndotmcgann/doppler-backup/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/johndotmcgann/doppler-backup/compare/v0.3.0...v0.4.0

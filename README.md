@@ -11,9 +11,11 @@ restore any snapshot back into Doppler.
 ## Prerequisites
 
 - Go 1.26+
-- The [`doppler` CLI](https://docs.doppler.com/docs/install-cli) installed
-  and authenticated (`doppler login`) — `doppler-backup` shells out to it
-  rather than talking to the Doppler API directly.
+- The [`doppler` CLI](https://docs.doppler.com/docs/install-cli), version
+  3.76.0 or newer, installed and authenticated (`doppler login`) —
+  `doppler-backup` shells out to it rather than talking to the Doppler API
+  directly. `backup` and `restore` check the installed CLI's version up
+  front and fail fast with a clear error if it's too old.
 
 ## Build
 
