@@ -14,9 +14,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/mcgannj/doppler-backup/internal/crypto"
-	"github.com/mcgannj/doppler-backup/internal/doppler"
-	"github.com/mcgannj/doppler-backup/internal/store"
+	"github.com/johndotmcgann/doppler-backup/internal/crypto"
+	"github.com/johndotmcgann/doppler-backup/internal/doppler"
+	"github.com/johndotmcgann/doppler-backup/internal/store"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=<git tag>".

@@ -1,4 +1,4 @@
-module github.com/mcgannj/doppler-backup
+module github.com/johndotmcgann/doppler-backup
 
 go 1.26.5
 

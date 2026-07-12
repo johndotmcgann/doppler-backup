@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mcgannj/doppler-backup/internal/crypto"
-	"github.com/mcgannj/doppler-backup/internal/doppler"
-	"github.com/mcgannj/doppler-backup/internal/store"
+	"github.com/johndotmcgann/doppler-backup/internal/crypto"
+	"github.com/johndotmcgann/doppler-backup/internal/doppler"
+	"github.com/johndotmcgann/doppler-backup/internal/store"
 )
 
 // testKDFParams uses a much smaller N than crypto.DefaultParams so these
