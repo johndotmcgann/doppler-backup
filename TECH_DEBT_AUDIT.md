@@ -32,9 +32,11 @@ resolve correctly against that document. Retracted; not listed below.
   the F04 follow-up work in `962f774`/`3ec8727`, after the prior audit)
   duplicated the same terminal-check/prompt/blank-check shape three times.
   Collapsed into a shared `resolveWithPrompt` helper.
-- Carried forward, still open, unchanged since 2026-07-10: **F13**
-  (`dbPath` global mutated directly by tests), **F14** (`newGCM` rebuilt
-  per call, immaterial at this scale), **F15** (unstructured stderr
+- **F13** (fixed this session): `dbPath` was a package-level global mutated
+  directly by tests. Now threaded explicitly through every `run*`/`newXCmd`
+  signature via a pointer owned by `main()`.
+- Carried forward, still open, unchanged since 2026-07-10: **F14** (`newGCM`
+  rebuilt per call, immaterial at this scale), **F15** (unstructured stderr
   logging), **F16** (README/go.mod Go-version pin, still in sync — no
   drift), **F17** (`main()` itself untested, as expected).
 - **F18** (stale generated artifacts) has improved: `testresults/*.json` is
@@ -62,7 +64,7 @@ audit round.
 | ID | Status | Category | File:Line | Severity | Effort | Description | Recommendation |
 |----|--------|----------|-----------|----------|--------|-------------|-----------------|
 | F01–F12 | ✅ Fixed (2026-07-10/11 session) | — | — | — | — | See `artifacts/TECH_DEBT_AUDIT_2026_07_10.md` for full detail (build.sh committed, Makefile version injection, testresults capture, passphrase prompting, temp-file signal cleanup, helper extraction, stale gitignore line, scrypt strengthening, toolchain/dependency bumps). | — |
-| F13 | Open (carried forward, unchanged) | Architectural decay | cmd/doppler-backup/main.go:25 | Low-Medium | S-M | `dbPath` is a package-level mutable global read by every `run*` function; `main_test.go:25-32` mutates it directly via a save/restore helper. Still safe only because no test calls `t.Parallel()`. | Thread `dbPath` through `run*` signatures instead of the global. |
+| F13 | ✅ Fixed (this session) | Architectural decay | cmd/doppler-backup/main.go:88-104 | Low-Medium | S-M | `dbPath` was a package-level mutable global read by every `run*` function; `main_test.go` mutated it directly via a save/restore helper. Safe only because no test called `t.Parallel()`. | Fixed: `dbPath` is now a local variable in `main()`, passed as a `*string` into each `newXCmd` constructor and dereferenced inside `RunE`; `run*`/`openStoreAndKey` take `dbPath` as an explicit parameter instead of reading a global. Tests now pass the path explicitly (`setTestDB` returns it; no global mutation). Verified: full test suite passes, including the child-process `TestRestoreCleansUpTempFileOnSignal` which now passes `dbPath` as a local var read from its env var instead of assigning a package global. |
 | F19 | ✅ Fixed (this session) | Security hygiene | internal/store/store.go:38-63 | High | S | `store.Open` calls `sql.Open` then `s.migrate()` (file created on first `Exec`), and only called `os.Chmod(path, 0o600)` afterward. Reproduced directly: under `umask 0002`, the file was `0644` (world-readable) in the window between creation and chmod on every `backup`/`restore`/`list`/`rotate` run against a not-yet-existing DB. | Fixed: `Open` now pre-creates the file via `os.OpenFile(path, os.O_RDWR\|os.O_CREATE, 0o600)` (and re-chmods for pre-existing files with looser permissions) before `sql.Open`/`migrate` ever touch it, closing the window. Verified: `TestOpenNeverCreatesFileUnderLoosePermissions` in `store_test.go` opens a fresh DB under `umask 0002` and asserts `0600` immediately. |
 | F20 | ✅ Fixed (this session) | Consistency rot / reuse | cmd/doppler-backup/main.go:106-166 | Medium | S | `resolvePassphrase`, `resolveEncryptPassphrase`, `resolveNewPassphrase` (current shape post-dates the 2026-07-10 audit) duplicated: check flag value, check `term.IsTerminal`, error via `errPassphraseRequired`, prompt, reject blank — differing only in strength validation and confirmation. | Fixed: all three now delegate to a shared `resolveWithPrompt(flagValue, promptLabel, flagName string, validate func(string) error, confirmLabel string) (string, error)`, parameterized by a `validate` func (`noopValidate` or `validatePassphraseStrength`) and an optional confirmation prompt label. Verified: existing `TestResolvePassphrase`/`TestResolveEncryptPassphrase`/`TestResolveNewPassphrase`/`TestNonInteractivePassphraseRequired` all pass unchanged, confirming behavior parity. |
 | F21 | **NEW** | Consistency rot | internal/store/store.go:64 and :115 | Low | S | Scrypt's legacy "interactive" defaults (`32768, 8, 1`) are hardcoded in two raw SQL DDL strings (`CREATE TABLE` default, `ALTER TABLE ADD COLUMN` backfill), and mirrored again in `store_test.go:11,267` and `crypto.go:29`'s comment. Four places that could drift with no compiler check. | Not urgent (historical constants that must never change), but a named Go constant interpolated into both DDL strings would remove the duplication risk. |
@@ -87,9 +89,10 @@ audit round.
    a fourth passphrase-consuming command or a prompt-UX change no longer
    means copy-pasting a fourth variant or editing three functions in
    lockstep.
-3. **F13 — stop mutating `dbPath` as a global in tests.** Held over from
-   2026-07-10, still unaddressed, still cheap to fix before someone adds
-   `t.Parallel()` and gets a confusing intermittent failure.
+3. ~~**F13 — stop mutating `dbPath` as a global in tests.**~~ ✅ Fixed (this
+   session). `dbPath` is now threaded explicitly through every function
+   signature instead of read from a package global, closing off the
+   intermittent-failure risk a future `t.Parallel()` would have exposed.
 4. **F21 — name the scrypt legacy-default constant.** Cheap, bundle with
    F19 while `store.go` is already open.
 5. **F22 — no action required, but keep in mind.** Not a code fix; listed
@@ -102,8 +105,8 @@ audit round.
       (High severity, S effort) — fixed this session.
 - [ ] F21: Extract `32768, 8, 1` into a named constant shared by both DDL
       statements (Low severity, S effort)
-- [ ] F13: Thread `dbPath` through `run*` signatures instead of a package
-      global (Low-Medium severity, S-M effort)
+- [x] F13: Thread `dbPath` through `run*` signatures instead of a package
+      global (Low-Medium severity, S-M effort) — fixed this session.
 
 ## Things that look bad but are actually fine
 
@@ -152,9 +155,10 @@ New this session:
   scenario worth defending against (relevant to F19's severity), or is
   this tool only ever expected to run on single-user machines/CI where the
   chmod race is moot?
-- Is there an intended future where tests run with `t.Parallel()`
-  (relevant to F13, open since 2026-07-10), or is the single-threaded test
-  suite a permanent choice for this project's size?
+- ~~Is there an intended future where tests run with `t.Parallel()`...~~
+  **Moot:** F13's fix removed the global `dbPath` these tests would have
+  raced on, so parallelizing the test suite is safe to adopt whenever
+  wanted; no longer a prerequisite either way.
 - `artifacts/` now holds dated audit snapshots (`TECH_DEBT_AUDIT_2026_07_10.md`)
   alongside `godocs/`/`testresults/` as gitignored build output. Should
   future audit runs keep writing the living document to repo-root

@@ -22,8 +22,6 @@ import (
 // Version is set at build time via -ldflags "-X main.Version=<git tag>".
 var Version = "dev"
 
-var dbPath string
-
 // minPassphraseLength is the floor enforced on passphrases used to encrypt
 // new data (backup, rotate's new passphrase). This passphrase is fed
 // directly into scrypt and protects a static SQLite file that an attacker
@@ -86,6 +84,7 @@ func checkDopplerVersion(client dopplerClient) error {
 }
 
 func main() {
+	var dbPath string
 	root := &cobra.Command{
 		Use:           "doppler-backup",
 		Short:         "Emergency backup/restore for Doppler secrets, snapshotted to an encrypted local SQLite database",
@@ -95,7 +94,7 @@ func main() {
 	}
 	root.PersistentFlags().StringVar(&dbPath, "db", "./doppler-backup.db", "path to the SQLite backup database")
 
-	root.AddCommand(newBackupCmd(), newRestoreCmd(), newListCmd(), newRotateCmd())
+	root.AddCommand(newBackupCmd(&dbPath), newRestoreCmd(&dbPath), newListCmd(&dbPath), newRotateCmd(&dbPath))
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -182,7 +181,7 @@ func readPassword(label string) (string, error) {
 	return string(b), nil
 }
 
-func newBackupCmd() *cobra.Command {
+func newBackupCmd(dbPath *string) *cobra.Command {
 	var project, passphrase string
 	cmd := &cobra.Command{
 		Use:   "backup",
@@ -192,7 +191,7 @@ func newBackupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runBackup(project, pass)
+			return runBackup(*dbPath, project, pass)
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", "", "limit backup to a single project (default: all projects)")
@@ -200,14 +199,14 @@ func newBackupCmd() *cobra.Command {
 	return cmd
 }
 
-func runBackup(project, passphrase string) error {
-	return runBackupWithClient(doppler.NewClient(), project, passphrase)
+func runBackup(dbPath, project, passphrase string) error {
+	return runBackupWithClient(doppler.NewClient(), dbPath, project, passphrase)
 }
 
 // openStoreAndKey opens the backup database at dbPath and derives the
 // AES key for passphrase from its (ensuring-if-absent) KDF salt. On error
 // the store is closed before returning.
-func openStoreAndKey(passphrase string) (*store.Store, []byte, error) {
+func openStoreAndKey(dbPath, passphrase string) (*store.Store, []byte, error) {
 	st, err := store.Open(dbPath)
 	if err != nil {
 		return nil, nil, err
@@ -225,12 +224,12 @@ func openStoreAndKey(passphrase string) (*store.Store, []byte, error) {
 	return st, key, nil
 }
 
-func runBackupWithClient(client dopplerClient, project, passphrase string) error {
+func runBackupWithClient(client dopplerClient, dbPath, project, passphrase string) error {
 	if err := checkDopplerVersion(client); err != nil {
 		return err
 	}
 
-	st, key, err := openStoreAndKey(passphrase)
+	st, key, err := openStoreAndKey(dbPath, passphrase)
 	if err != nil {
 		return err
 	}
@@ -288,7 +287,7 @@ func backupOne(st *store.Store, client dopplerClient, key []byte, project, confi
 	return st.SaveSnapshot(project, config, nonce, ciphertext)
 }
 
-func newRestoreCmd() *cobra.Command {
+func newRestoreCmd(dbPath *string) *cobra.Command {
 	var project, config, passphrase string
 	var snapshotID int64
 	cmd := &cobra.Command{
@@ -299,7 +298,7 @@ func newRestoreCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runRestore(project, config, pass, snapshotID)
+			return runRestore(*dbPath, project, config, pass, snapshotID)
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", "", "project to restore into (required)")
@@ -311,8 +310,8 @@ func newRestoreCmd() *cobra.Command {
 	return cmd
 }
 
-func runRestore(project, config, passphrase string, snapshotID int64) error {
-	return runRestoreWithClient(doppler.NewClient(), project, config, passphrase, snapshotID)
+func runRestore(dbPath, project, config, passphrase string, snapshotID int64) error {
+	return runRestoreWithClient(doppler.NewClient(), dbPath, project, config, passphrase, snapshotID)
 }
 
 // plaintextTempDir returns a memory-backed directory (tmpfs) for the
@@ -326,12 +325,12 @@ func plaintextTempDir() string {
 	return ""
 }
 
-func runRestoreWithClient(client dopplerClient, project, config, passphrase string, snapshotID int64) error {
+func runRestoreWithClient(client dopplerClient, dbPath, project, config, passphrase string, snapshotID int64) error {
 	if err := checkDopplerVersion(client); err != nil {
 		return err
 	}
 
-	st, key, err := openStoreAndKey(passphrase)
+	st, key, err := openStoreAndKey(dbPath, passphrase)
 	if err != nil {
 		return err
 	}
@@ -400,20 +399,20 @@ func runRestoreWithClient(client dopplerClient, project, config, passphrase stri
 	return nil
 }
 
-func newListCmd() *cobra.Command {
+func newListCmd(dbPath *string) *cobra.Command {
 	var project string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List stored snapshots",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runList(project)
+			return runList(*dbPath, project)
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", "", "limit to a single project")
 	return cmd
 }
 
-func runList(project string) error {
+func runList(dbPath, project string) error {
 	st, err := store.Open(dbPath)
 	if err != nil {
 		return err
@@ -435,7 +434,7 @@ func runList(project string) error {
 	return nil
 }
 
-func newRotateCmd() *cobra.Command {
+func newRotateCmd(dbPath *string) *cobra.Command {
 	var oldPassphrase, newPassphrase string
 	cmd := &cobra.Command{
 		Use:   "rotate",
@@ -449,7 +448,7 @@ func newRotateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runRotate(oldPass, newPass)
+			return runRotate(*dbPath, oldPass, newPass)
 		},
 	}
 	cmd.Flags().StringVar(&oldPassphrase, "old-passphrase", "", "current passphrase used to decrypt existing snapshots — required; prompts interactively if omitted, or pass this flag explicitly for non-interactive/cron use")
@@ -457,7 +456,7 @@ func newRotateCmd() *cobra.Command {
 	return cmd
 }
 
-func runRotate(oldPassphrase, newPassphrase string) error {
+func runRotate(dbPath, oldPassphrase, newPassphrase string) error {
 	st, err := store.Open(dbPath)
 	if err != nil {
 		return err

@@ -20,15 +20,10 @@ import (
 // tests don't pay real scrypt work-factor cost on every DeriveKey call.
 var testKDFParams = store.KDFParams{N: 1 << 4, R: 8, P: 1}
 
-// setTestDB points the package-level dbPath at a fresh temp file for the
-// duration of the test.
+// setTestDB returns a fresh temp file path for a test's backup database.
 func setTestDB(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "test.db")
-	prev := dbPath
-	dbPath = path
-	t.Cleanup(func() { dbPath = prev })
-	return path
+	return filepath.Join(t.TempDir(), "test.db")
 }
 
 // fakeClient implements dopplerClient with scripted responses.
@@ -96,7 +91,7 @@ func (f *fakeClient) Version() (string, error) {
 }
 
 func TestRunBackupWithClientAllProjects(t *testing.T) {
-	setTestDB(t)
+	dbPath := setTestDB(t)
 
 	client := &fakeClient{
 		projects: []doppler.Project{{Name: "proj-a"}, {Name: "proj-b"}},
@@ -110,7 +105,7 @@ func TestRunBackupWithClientAllProjects(t *testing.T) {
 		},
 	}
 
-	if err := runBackupWithClient(client, "", "passphrase"); err != nil {
+	if err := runBackupWithClient(client, dbPath, "", "passphrase"); err != nil {
 		t.Fatalf("run backup: %v", err)
 	}
 
@@ -129,7 +124,7 @@ func TestRunBackupWithClientAllProjects(t *testing.T) {
 }
 
 func TestRunBackupWithClientSingleProjectSkipsListProjects(t *testing.T) {
-	setTestDB(t)
+	dbPath := setTestDB(t)
 
 	client := &fakeClient{
 		listProjectsErr: errors.New("ListProjects should not be called when --project is set"),
@@ -141,13 +136,13 @@ func TestRunBackupWithClientSingleProjectSkipsListProjects(t *testing.T) {
 		},
 	}
 
-	if err := runBackupWithClient(client, "proj-a", "passphrase"); err != nil {
+	if err := runBackupWithClient(client, dbPath, "proj-a", "passphrase"); err != nil {
 		t.Fatalf("run backup: %v", err)
 	}
 }
 
 func TestRunBackupWithClientPartialFailureTolerated(t *testing.T) {
-	setTestDB(t)
+	dbPath := setTestDB(t)
 
 	client := &fakeClient{
 		projects: []doppler.Project{{Name: "proj-a"}},
@@ -162,7 +157,7 @@ func TestRunBackupWithClientPartialFailureTolerated(t *testing.T) {
 		},
 	}
 
-	if err := runBackupWithClient(client, "", "passphrase"); err != nil {
+	if err := runBackupWithClient(client, dbPath, "", "passphrase"); err != nil {
 		t.Fatalf("expected partial failure to be tolerated, got error: %v", err)
 	}
 
@@ -181,7 +176,7 @@ func TestRunBackupWithClientPartialFailureTolerated(t *testing.T) {
 }
 
 func TestRunBackupWithClientAllFailReturnsError(t *testing.T) {
-	setTestDB(t)
+	dbPath := setTestDB(t)
 
 	client := &fakeClient{
 		projects: []doppler.Project{{Name: "proj-a"}},
@@ -190,30 +185,30 @@ func TestRunBackupWithClientAllFailReturnsError(t *testing.T) {
 		},
 	}
 
-	if err := runBackupWithClient(client, "", "passphrase"); err == nil {
+	if err := runBackupWithClient(client, dbPath, "", "passphrase"); err == nil {
 		t.Fatalf("expected error when every backup fails")
 	}
 }
 
 func TestRunBackupWithClientTooOldVersionFailsFast(t *testing.T) {
-	setTestDB(t)
+	dbPath := setTestDB(t)
 
 	client := &fakeClient{
 		version:         "3.0.0",
 		listProjectsErr: errors.New("ListProjects should not be called when the version check fails"),
 	}
 
-	if err := runBackupWithClient(client, "", "passphrase"); err == nil {
+	if err := runBackupWithClient(client, dbPath, "", "passphrase"); err == nil {
 		t.Fatalf("expected error for too-old doppler CLI version")
 	}
 }
 
 func TestRunRestoreWithClientTooOldVersionFailsFast(t *testing.T) {
-	setTestDB(t)
+	dbPath := setTestDB(t)
 
 	client := &fakeClient{version: "3.0.0"}
 
-	if err := runRestoreWithClient(client, "proj", "dev", "passphrase", 0); err == nil {
+	if err := runRestoreWithClient(client, dbPath, "proj", "dev", "passphrase", 0); err == nil {
 		t.Fatalf("expected error for too-old doppler CLI version")
 	}
 	if client.uploadedProject != "" {
@@ -222,7 +217,7 @@ func TestRunRestoreWithClientTooOldVersionFailsFast(t *testing.T) {
 }
 
 func TestRunRestoreWithClientLatestSnapshot(t *testing.T) {
-	setTestDB(t)
+	dbPath := setTestDB(t)
 
 	st, err := store.Open(dbPath)
 	if err != nil {
@@ -247,7 +242,7 @@ func TestRunRestoreWithClientLatestSnapshot(t *testing.T) {
 	st.Close()
 
 	client := &fakeClient{}
-	if err := runRestoreWithClient(client, "proj", "dev", "passphrase", 0); err != nil {
+	if err := runRestoreWithClient(client, dbPath, "proj", "dev", "passphrase", 0); err != nil {
 		t.Fatalf("run restore: %v", err)
 	}
 
@@ -321,7 +316,7 @@ func TestRestoreCleansUpTempFileOnSignal(t *testing.T) {
 // UploadSecrets reports the temp file path and stalls, giving the parent
 // test a window to deliver SIGINT.
 func signalTestChildMain() {
-	dbPath = os.Getenv("DOPPLER_BACKUP_SIGTEST_DB")
+	dbPath := os.Getenv("DOPPLER_BACKUP_SIGTEST_DB")
 	pathFile := os.Getenv("DOPPLER_BACKUP_SIGTEST_PATHFILE")
 
 	st, err := store.Open(dbPath)
@@ -346,7 +341,7 @@ func signalTestChildMain() {
 	st.Close()
 
 	client := &slowUploadClient{pathFile: pathFile}
-	if err := runRestoreWithClient(client, "proj", "dev", "passphrase", 0); err != nil {
+	if err := runRestoreWithClient(client, dbPath, "proj", "dev", "passphrase", 0); err != nil {
 		log.Fatalf("restore: %v", err)
 	}
 }
@@ -383,7 +378,7 @@ func TestPlaintextTempDirPrefersTmpfs(t *testing.T) {
 }
 
 func TestRunRestoreWithClientSpecificSnapshotID(t *testing.T) {
-	setTestDB(t)
+	dbPath := setTestDB(t)
 
 	st, err := store.Open(dbPath)
 	if err != nil {
@@ -422,7 +417,7 @@ func TestRunRestoreWithClientSpecificSnapshotID(t *testing.T) {
 	st.Close()
 
 	client := &fakeClient{}
-	if err := runRestoreWithClient(client, "proj", "dev", "passphrase", firstSnap.ID); err != nil {
+	if err := runRestoreWithClient(client, dbPath, "proj", "dev", "passphrase", firstSnap.ID); err != nil {
 		t.Fatalf("run restore: %v", err)
 	}
 	if string(client.uploadedContent) != string(firstPlaintext) {
@@ -431,16 +426,16 @@ func TestRunRestoreWithClientSpecificSnapshotID(t *testing.T) {
 }
 
 func TestRunRestoreWithClientNoSnapshotFound(t *testing.T) {
-	setTestDB(t)
+	dbPath := setTestDB(t)
 
 	client := &fakeClient{}
-	if err := runRestoreWithClient(client, "proj", "dev", "passphrase", 0); err == nil {
+	if err := runRestoreWithClient(client, dbPath, "proj", "dev", "passphrase", 0); err == nil {
 		t.Fatalf("expected error when no snapshot exists")
 	}
 }
 
 func TestRunRestoreWithClientWrongPassphraseFails(t *testing.T) {
-	setTestDB(t)
+	dbPath := setTestDB(t)
 
 	st, err := store.Open(dbPath)
 	if err != nil {
@@ -464,7 +459,7 @@ func TestRunRestoreWithClientWrongPassphraseFails(t *testing.T) {
 	st.Close()
 
 	client := &fakeClient{}
-	if err := runRestoreWithClient(client, "proj", "dev", "wrong-passphrase", 0); err == nil {
+	if err := runRestoreWithClient(client, dbPath, "proj", "dev", "wrong-passphrase", 0); err == nil {
 		t.Fatalf("expected error when restoring with the wrong passphrase")
 	}
 }
@@ -493,7 +488,7 @@ func TestRunRotateEndToEnd(t *testing.T) {
 	}
 	st.Close()
 
-	if err := runRotate("old-passphrase", "new-passphrase"); err != nil {
+	if err := runRotate(path, "old-passphrase", "new-passphrase"); err != nil {
 		t.Fatalf("run rotate: %v", err)
 	}
 
@@ -506,10 +501,10 @@ func TestRunRotateEndToEnd(t *testing.T) {
 	}
 
 	client := &fakeClient{}
-	if err := runRestoreWithClient(client, "proj", "dev", "old-passphrase", 0); err == nil {
+	if err := runRestoreWithClient(client, path, "proj", "dev", "old-passphrase", 0); err == nil {
 		t.Fatalf("expected old passphrase to fail after rotation")
 	}
-	if err := runRestoreWithClient(client, "proj", "dev", "new-passphrase", 0); err != nil {
+	if err := runRestoreWithClient(client, path, "proj", "dev", "new-passphrase", 0); err != nil {
 		t.Fatalf("expected new passphrase to succeed after rotation: %v", err)
 	}
 }
@@ -569,7 +564,8 @@ func TestRequiredFlagsEnforced(t *testing.T) {
 	// it falls back to an interactive prompt, or errors when stdin isn't a
 	// terminal (see TestResolvePassphrase / TestResolveEncryptPassphrase /
 	// TestResolveNewPassphrase).
-	restoreCmd := newRestoreCmd()
+	var dbPath string
+	restoreCmd := newRestoreCmd(&dbPath)
 	restoreCmd.SetArgs([]string{"--project", "p"})
 	restoreCmd.SilenceUsage = true
 	restoreCmd.SilenceErrors = true
@@ -585,9 +581,9 @@ func TestRequiredFlagsEnforced(t *testing.T) {
 // marked moot, since F04 removed rotate's required-flag enforcement
 // entirely) as F06 in TECH_DEBT_AUDIT.md.
 func TestNonInteractivePassphraseRequired(t *testing.T) {
-	setTestDB(t)
+	dbPath := setTestDB(t)
 
-	backupCmd := newBackupCmd()
+	backupCmd := newBackupCmd(&dbPath)
 	backupCmd.SetArgs([]string{})
 	backupCmd.SilenceUsage = true
 	backupCmd.SilenceErrors = true
@@ -595,7 +591,7 @@ func TestNonInteractivePassphraseRequired(t *testing.T) {
 		t.Fatalf("expected error when backup has no passphrase and stdin isn't a terminal")
 	}
 
-	restoreCmd := newRestoreCmd()
+	restoreCmd := newRestoreCmd(&dbPath)
 	restoreCmd.SetArgs([]string{"--project", "p", "--config", "c"})
 	restoreCmd.SilenceUsage = true
 	restoreCmd.SilenceErrors = true
@@ -603,7 +599,7 @@ func TestNonInteractivePassphraseRequired(t *testing.T) {
 		t.Fatalf("expected error when restore has no passphrase and stdin isn't a terminal")
 	}
 
-	rotateCmd := newRotateCmd()
+	rotateCmd := newRotateCmd(&dbPath)
 	rotateCmd.SetArgs([]string{})
 	rotateCmd.SilenceUsage = true
 	rotateCmd.SilenceErrors = true
@@ -681,9 +677,9 @@ func TestValidatePassphraseStrength(t *testing.T) {
 }
 
 func TestRunListEmptyAndPopulated(t *testing.T) {
-	setTestDB(t)
+	dbPath := setTestDB(t)
 
-	if err := runList(""); err != nil {
+	if err := runList(dbPath, ""); err != nil {
 		t.Fatalf("run list (empty): %v", err)
 	}
 
@@ -696,13 +692,13 @@ func TestRunListEmptyAndPopulated(t *testing.T) {
 	}
 	st.Close()
 
-	if err := runList(""); err != nil {
+	if err := runList(dbPath, ""); err != nil {
 		t.Fatalf("run list (populated): %v", err)
 	}
-	if err := runList("proj-a"); err != nil {
+	if err := runList(dbPath, "proj-a"); err != nil {
 		t.Fatalf("run list (filtered): %v", err)
 	}
-	if err := runList("no-such-project"); err != nil {
+	if err := runList(dbPath, "no-such-project"); err != nil {
 		t.Fatalf("run list (filtered, no matches): %v", err)
 	}
 }
