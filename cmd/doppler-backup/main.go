@@ -103,15 +103,23 @@ func main() {
 	}
 }
 
-// resolvePassphrase resolves a passphrase used only to decrypt existing
-// data. It returns flagValue if set. Otherwise, if stdin is a terminal, it
-// prompts interactively without echoing input; a blank entry is an error.
-// If stdin isn't a terminal (e.g. cron) and no flag was given, it errors
-// rather than prompting. It deliberately does not enforce
-// minPassphraseLength, because the database may have been created under a
-// shorter passphrase before length enforcement existed.
-func resolvePassphrase(flagValue, promptLabel, flagName string) (string, error) {
+// noopValidate accepts any passphrase, used for passphrases that only
+// decrypt existing data (see resolvePassphrase).
+func noopValidate(string) error { return nil }
+
+// resolveWithPrompt returns flagValue, after validate, if set. Otherwise,
+// if stdin is a terminal, it prompts interactively without echoing input,
+// rejects a blank entry, and validates the result too. If stdin isn't a
+// terminal (e.g. cron) and no flag was given, it errors rather than
+// prompting. If confirmLabel is non-empty, prompting asks a second time
+// under that label and requires the two entries to match, guarding against
+// a typo locking the database; this only applies to the prompt path, since
+// a flag value has no separate confirmation to compare against.
+func resolveWithPrompt(flagValue, promptLabel, flagName string, validate func(string) error, confirmLabel string) (string, error) {
 	if flagValue != "" {
+		if err := validate(flagValue); err != nil {
+			return "", err
+		}
 		return flagValue, nil
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -124,66 +132,42 @@ func resolvePassphrase(flagValue, promptLabel, flagName string) (string, error) 
 	if pass == "" {
 		return "", fmt.Errorf("passphrase must not be blank")
 	}
+	if err := validate(pass); err != nil {
+		return "", err
+	}
+	if confirmLabel == "" {
+		return pass, nil
+	}
+	confirm, err := readPassword(confirmLabel)
+	if err != nil {
+		return "", err
+	}
+	if pass != confirm {
+		return "", fmt.Errorf("passphrases do not match")
+	}
 	return pass, nil
+}
+
+// resolvePassphrase resolves a passphrase used only to decrypt existing
+// data. It deliberately does not enforce minPassphraseLength, because the
+// database may have been created under a shorter passphrase before length
+// enforcement existed.
+func resolvePassphrase(flagValue, promptLabel, flagName string) (string, error) {
+	return resolveWithPrompt(flagValue, promptLabel, flagName, noopValidate, "")
 }
 
 // resolveEncryptPassphrase behaves like resolvePassphrase, but is used for
 // passphrases that will encrypt new data (backup), so it additionally
 // enforces minPassphraseLength on both the flag and the prompt path.
 func resolveEncryptPassphrase(flagValue, promptLabel, flagName string) (string, error) {
-	if flagValue != "" {
-		if err := validatePassphraseStrength(flagValue); err != nil {
-			return "", err
-		}
-		return flagValue, nil
-	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return "", errPassphraseRequired(flagName)
-	}
-	pass, err := readPassword(promptLabel)
-	if err != nil {
-		return "", err
-	}
-	if pass == "" {
-		return "", fmt.Errorf("passphrase must not be blank")
-	}
-	if err := validatePassphraseStrength(pass); err != nil {
-		return "", err
-	}
-	return pass, nil
+	return resolveWithPrompt(flagValue, promptLabel, flagName, validatePassphraseStrength, "")
 }
 
 // resolveNewPassphrase behaves like resolveEncryptPassphrase, except when
 // prompting interactively it asks for the new passphrase twice and requires
 // the two entries to match, guarding against a typo locking the database.
 func resolveNewPassphrase(flagValue string) (string, error) {
-	if flagValue != "" {
-		if err := validatePassphraseStrength(flagValue); err != nil {
-			return "", err
-		}
-		return flagValue, nil
-	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return "", errPassphraseRequired("--new-passphrase")
-	}
-	first, err := readPassword("New passphrase")
-	if err != nil {
-		return "", err
-	}
-	if first == "" {
-		return "", fmt.Errorf("passphrase must not be blank")
-	}
-	if err := validatePassphraseStrength(first); err != nil {
-		return "", err
-	}
-	confirm, err := readPassword("Confirm new passphrase")
-	if err != nil {
-		return "", err
-	}
-	if first != confirm {
-		return "", fmt.Errorf("passphrases do not match")
-	}
-	return first, nil
+	return resolveWithPrompt(flagValue, "New passphrase", "--new-passphrase", validatePassphraseStrength, "Confirm new passphrase")
 }
 
 // readPassword prompts label on stderr and reads a line from stdin without

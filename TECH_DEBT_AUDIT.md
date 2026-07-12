@@ -23,15 +23,15 @@ resolve correctly against that document. Retracted; not listed below.
   (`govulncheck`), and well-tested (67–95% coverage per package). Still not
   a neglected codebase — the prior audit's Top 5 are all fixed, and this
   pass mostly confirms that rather than finding new rot.
-- New this session: **F19** — the encrypted backup SQLite file is briefly
-  world-readable (confirmed by reproduction) before `store.Open` chmods it
-  to `0600`. This is the most concrete actionable finding in either audit
-  round.
-- New this session: **F20** — `resolvePassphrase` /
+- **F19** (fixed this session): the encrypted backup SQLite file was
+  briefly world-readable (confirmed by reproduction) before `store.Open`
+  chmoded it to `0600`. Was the most concrete actionable finding in either
+  audit round.
+- **F20** (fixed this session): `resolvePassphrase` /
   `resolveEncryptPassphrase` / `resolveNewPassphrase` (added/extended by
-  the F04 follow-up work in `962f774`/`3ec8727`, after the prior audit) now
-  duplicate the same terminal-check/prompt/blank-check shape three times.
-  This duplication didn't exist in the form audited on 2026-07-10.
+  the F04 follow-up work in `962f774`/`3ec8727`, after the prior audit)
+  duplicated the same terminal-check/prompt/blank-check shape three times.
+  Collapsed into a shared `resolveWithPrompt` helper.
 - Carried forward, still open, unchanged since 2026-07-10: **F13**
   (`dbPath` global mutated directly by tests), **F14** (`newGCM` rebuilt
   per call, immaterial at this scale), **F15** (unstructured stderr
@@ -64,7 +64,7 @@ audit round.
 | F01–F12 | ✅ Fixed (2026-07-10/11 session) | — | — | — | — | See `artifacts/TECH_DEBT_AUDIT_2026_07_10.md` for full detail (build.sh committed, Makefile version injection, testresults capture, passphrase prompting, temp-file signal cleanup, helper extraction, stale gitignore line, scrypt strengthening, toolchain/dependency bumps). | — |
 | F13 | Open (carried forward, unchanged) | Architectural decay | cmd/doppler-backup/main.go:25 | Low-Medium | S-M | `dbPath` is a package-level mutable global read by every `run*` function; `main_test.go:25-32` mutates it directly via a save/restore helper. Still safe only because no test calls `t.Parallel()`. | Thread `dbPath` through `run*` signatures instead of the global. |
 | F19 | ✅ Fixed (this session) | Security hygiene | internal/store/store.go:38-63 | High | S | `store.Open` calls `sql.Open` then `s.migrate()` (file created on first `Exec`), and only called `os.Chmod(path, 0o600)` afterward. Reproduced directly: under `umask 0002`, the file was `0644` (world-readable) in the window between creation and chmod on every `backup`/`restore`/`list`/`rotate` run against a not-yet-existing DB. | Fixed: `Open` now pre-creates the file via `os.OpenFile(path, os.O_RDWR\|os.O_CREATE, 0o600)` (and re-chmods for pre-existing files with looser permissions) before `sql.Open`/`migrate` ever touch it, closing the window. Verified: `TestOpenNeverCreatesFileUnderLoosePermissions` in `store_test.go` opens a fresh DB under `umask 0002` and asserts `0600` immediately. |
-| F20 | **NEW** | Consistency rot / reuse | cmd/doppler-backup/main.go:113-187 | Medium | S | `resolvePassphrase`, `resolveEncryptPassphrase`, `resolveNewPassphrase` (current shape post-dates the 2026-07-10 audit) duplicate: check flag value, check `term.IsTerminal`, error via `errPassphraseRequired`, prompt, reject blank — differing only in strength validation and confirmation. | Extract a shared `resolveWithPrompt(flagValue, promptLabel, flagName string, validate func(string) error, confirm bool) (string, error)`. |
+| F20 | ✅ Fixed (this session) | Consistency rot / reuse | cmd/doppler-backup/main.go:106-166 | Medium | S | `resolvePassphrase`, `resolveEncryptPassphrase`, `resolveNewPassphrase` (current shape post-dates the 2026-07-10 audit) duplicated: check flag value, check `term.IsTerminal`, error via `errPassphraseRequired`, prompt, reject blank — differing only in strength validation and confirmation. | Fixed: all three now delegate to a shared `resolveWithPrompt(flagValue, promptLabel, flagName string, validate func(string) error, confirmLabel string) (string, error)`, parameterized by a `validate` func (`noopValidate` or `validatePassphraseStrength`) and an optional confirmation prompt label. Verified: existing `TestResolvePassphrase`/`TestResolveEncryptPassphrase`/`TestResolveNewPassphrase`/`TestNonInteractivePassphraseRequired` all pass unchanged, confirming behavior parity. |
 | F21 | **NEW** | Consistency rot | internal/store/store.go:64 and :115 | Low | S | Scrypt's legacy "interactive" defaults (`32768, 8, 1`) are hardcoded in two raw SQL DDL strings (`CREATE TABLE` default, `ALTER TABLE ADD COLUMN` backfill), and mirrored again in `store_test.go:11,267` and `crypto.go:29`'s comment. Four places that could drift with no compiler check. | Not urgent (historical constants that must never change), but a named Go constant interpolated into both DDL strings would remove the duplication risk. |
 | F14 | Open (carried forward, unchanged, non-issue at current scale) | Performance | internal/crypto/crypto.go:88-98 (`newGCM`) | Low | — | Rebuilds the AES block cipher + GCM wrapper on every `Encrypt`/`Decrypt` call rather than caching per key. Immaterial — call volume is bounded by configs-per-run, not a hot loop. | No action needed; flagged so it isn't copy-pasted into a hot path elsewhere unnoticed. |
 | F15 | Open (carried forward, unchanged) | Observability | cmd/doppler-backup/main.go:269,275 | Low | — | Backup failures print human text to stderr (`skipping project %s: %v`) rather than structured logs — fine for manual/cron use with captured output, no machine-parseable failure detail. | Only worth addressing if a future requirement needs machine-readable failure reporting. |
@@ -82,9 +82,11 @@ audit round.
    metadata) to other local accounts on every invocation against a
    not-yet-existing DB. `store.Open` now pre-creates the file at `0600`
    before `sql.Open`/`migrate` touch it.
-2. **F20 — collapse the three passphrase resolvers.** A fourth
-   passphrase-consuming command or a prompt-UX change will otherwise mean
-   copy-pasting a fourth variant or editing three functions in lockstep.
+2. ~~**F20 — collapse the three passphrase resolvers.**~~ ✅ Fixed (this
+   session). All three now delegate to a shared `resolveWithPrompt` helper;
+   a fourth passphrase-consuming command or a prompt-UX change no longer
+   means copy-pasting a fourth variant or editing three functions in
+   lockstep.
 3. **F13 — stop mutating `dbPath` as a global in tests.** Held over from
    2026-07-10, still unaddressed, still cheap to fix before someone adds
    `t.Parallel()` and gets a confusing intermittent failure.
