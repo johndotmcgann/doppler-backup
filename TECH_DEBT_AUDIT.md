@@ -1,20 +1,9 @@
 # Tech Debt Audit — doppler-backup
 
-Generated: 2026-07-10 (as `artifacts/TECH_DEBT_AUDIT_2026_07_10.md`)
-Updated: 2026-07-11 — see prior audit's "Resolved 2026-07-11" / "Resolved
-this session" sections (F01–F12 fixed, F10 added and fixed, F06 moot).
-Updated: 2026-07-12 (this run) — re-audited against current `main`
-(`dc05b69`). F13–F18 from the prior audit re-verified below; four new
-findings (**F19–F22**) found this session. The correction below applies to
-last session's initial attempt at this run before the prior audit was
-located.
-
-**Correction:** an earlier pass of this session's audit (before the prior
-`artifacts/TECH_DEBT_AUDIT_2026_07_10.md` was located) flagged a "dangling
-`TECH_DEBT_AUDIT.md` reference" in `main_test.go:584-586` as a documentation
-drift finding. That's wrong — the file exists at
-`artifacts/TECH_DEBT_AUDIT_2026_07_10.md`, and the F04/F06 IDs it cites
-resolve correctly against that document. Retracted; not listed below.
+Generated: 2026-07-10 (as `artifacts/TECH_DEBT_AUDIT_2026_07_10.md`; F01–F12
+fixed there by 2026-07-11).
+Updated: 2026-07-12 — re-audited current `main`; F13–F18 re-verified,
+F19–F22 found and fixed this session.
 
 ## Executive summary
 
@@ -69,7 +58,7 @@ audit round.
 
 | ID | Status | Category | File:Line | Severity | Effort | Description | Recommendation |
 |----|--------|----------|-----------|----------|--------|-------------|-----------------|
-| F01–F12 | ✅ Fixed (2026-07-10/11 session) | — | — | — | — | See `artifacts/TECH_DEBT_AUDIT_2026_07_10.md` for full detail (build.sh committed, Makefile version injection, testresults capture, passphrase prompting, temp-file signal cleanup, helper extraction, stale gitignore line, scrypt strengthening, toolchain/dependency bumps). | — |
+| F01–F12 | ✅ Fixed (2026-07-10/11) | — | — | — | — | Early hardening pass — build reproducibility, passphrase handling, temp-file safety, scrypt strengthening, dependency bumps. Detail: `artifacts/TECH_DEBT_AUDIT_2026_07_10.md`. | — |
 | F13 | ✅ Fixed (this session) | Architectural decay | cmd/doppler-backup/main.go:88-104 | Low-Medium | S-M | `dbPath` was a package-level mutable global read by every `run*` function; `main_test.go` mutated it directly via a save/restore helper. Safe only because no test called `t.Parallel()`. | Fixed: `dbPath` is now a local variable in `main()`, passed as a `*string` into each `newXCmd` constructor and dereferenced inside `RunE`; `run*`/`openStoreAndKey` take `dbPath` as an explicit parameter instead of reading a global. Tests now pass the path explicitly (`setTestDB` returns it; no global mutation). Verified: full test suite passes, including the child-process `TestRestoreCleansUpTempFileOnSignal` which now passes `dbPath` as a local var read from its env var instead of assigning a package global. |
 | F19 | ✅ Fixed (this session) | Security hygiene | internal/store/store.go:38-63 | High | S | `store.Open` calls `sql.Open` then `s.migrate()` (file created on first `Exec`), and only called `os.Chmod(path, 0o600)` afterward. Reproduced directly: under `umask 0002`, the file was `0644` (world-readable) in the window between creation and chmod on every `backup`/`restore`/`list`/`rotate` run against a not-yet-existing DB. | Fixed: `Open` now pre-creates the file via `os.OpenFile(path, os.O_RDWR\|os.O_CREATE, 0o600)` (and re-chmods for pre-existing files with looser permissions) before `sql.Open`/`migrate` ever touch it, closing the window. Verified: `TestOpenNeverCreatesFileUnderLoosePermissions` in `store_test.go` opens a fresh DB under `umask 0002` and asserts `0600` immediately. |
 | F20 | ✅ Fixed (this session) | Consistency rot / reuse | cmd/doppler-backup/main.go:106-166 | Medium | S | `resolvePassphrase`, `resolveEncryptPassphrase`, `resolveNewPassphrase` (current shape post-dates the 2026-07-10 audit) duplicated: check flag value, check `term.IsTerminal`, error via `errPassphraseRequired`, prompt, reject blank — differing only in strength validation and confirmation. | Fixed: all three now delegate to a shared `resolveWithPrompt(flagValue, promptLabel, flagName string, validate func(string) error, confirmLabel string) (string, error)`, parameterized by a `validate` func (`noopValidate` or `validatePassphraseStrength`) and an optional confirmation prompt label. Verified: existing `TestResolvePassphrase`/`TestResolveEncryptPassphrase`/`TestResolveNewPassphrase`/`TestNonInteractivePassphraseRequired` all pass unchanged, confirming behavior parity. |
