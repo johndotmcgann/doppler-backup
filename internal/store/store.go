@@ -33,6 +33,18 @@ type KDFParams struct {
 	N, R, P int
 }
 
+// legacyScryptN, legacyScryptR, legacyScryptP are scrypt's 2009
+// "interactive" defaults, used as the kdf_n/kdf_r/kdf_p columns' DEFAULT in
+// both the CREATE TABLE and the ALTER TABLE backfill below, so a database
+// created before those columns existed (and thus derived its key under
+// these values, hardcoded at the time) keeps re-deriving correctly without
+// requiring a rotate.
+const (
+	legacyScryptN = 32768
+	legacyScryptR = 8
+	legacyScryptP = 1
+)
+
 // Open opens (creating if necessary) the SQLite database at path, ensures
 // its schema exists, and locks the file down to owner-only permissions.
 func Open(path string) (*Store, error) {
@@ -68,13 +80,13 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(`
+	_, err := s.db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS meta (
 			id       INTEGER PRIMARY KEY CHECK (id = 1),
 			kdf_salt BLOB NOT NULL,
-			kdf_n    INTEGER NOT NULL DEFAULT 32768,
-			kdf_r    INTEGER NOT NULL DEFAULT 8,
-			kdf_p    INTEGER NOT NULL DEFAULT 1
+			kdf_n    INTEGER NOT NULL DEFAULT %d,
+			kdf_r    INTEGER NOT NULL DEFAULT %d,
+			kdf_p    INTEGER NOT NULL DEFAULT %d
 		);
 		CREATE TABLE IF NOT EXISTS snapshots (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,7 +98,7 @@ func (s *Store) migrate() error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_snapshots_project_config
 			ON snapshots(project, config, taken_at);
-	`)
+	`, legacyScryptN, legacyScryptR, legacyScryptP))
 	if err != nil {
 		return fmt.Errorf("migrate schema: %w", err)
 	}
@@ -123,9 +135,9 @@ func (s *Store) addMissingKDFColumns() error {
 	rows.Close()
 
 	for _, col := range []struct{ name, ddl string }{
-		{"kdf_n", `ALTER TABLE meta ADD COLUMN kdf_n INTEGER NOT NULL DEFAULT 32768`},
-		{"kdf_r", `ALTER TABLE meta ADD COLUMN kdf_r INTEGER NOT NULL DEFAULT 8`},
-		{"kdf_p", `ALTER TABLE meta ADD COLUMN kdf_p INTEGER NOT NULL DEFAULT 1`},
+		{"kdf_n", fmt.Sprintf(`ALTER TABLE meta ADD COLUMN kdf_n INTEGER NOT NULL DEFAULT %d`, legacyScryptN)},
+		{"kdf_r", fmt.Sprintf(`ALTER TABLE meta ADD COLUMN kdf_r INTEGER NOT NULL DEFAULT %d`, legacyScryptR)},
+		{"kdf_p", fmt.Sprintf(`ALTER TABLE meta ADD COLUMN kdf_p INTEGER NOT NULL DEFAULT %d`, legacyScryptP)},
 	} {
 		if have[col.name] {
 			continue

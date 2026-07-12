@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-var testKDFParams = KDFParams{N: 32768, R: 8, P: 1}
+var testKDFParams = KDFParams{N: legacyScryptN, R: legacyScryptR, P: legacyScryptP}
 
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
@@ -265,7 +265,7 @@ func TestOpenMigratesPreKDFParamsDatabase(t *testing.T) {
 	if string(salt) != "legacy-salt-01234" {
 		t.Fatalf("expected preserved legacy salt, got %q", salt)
 	}
-	want := KDFParams{N: 32768, R: 8, P: 1}
+	want := KDFParams{N: legacyScryptN, R: legacyScryptR, P: legacyScryptP}
 	if params != want {
 		t.Fatalf("expected legacy scrypt defaults backfilled as %+v, got %+v", want, params)
 	}

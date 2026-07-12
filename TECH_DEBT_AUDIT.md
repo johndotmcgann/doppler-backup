@@ -44,9 +44,12 @@ resolve correctly against that document. Retracted; not listed below.
   current as of the latest `build.sh` run — the prior concern was about
   emptiness/staleness, both now resolved as a side effect of F03's fix.
   Downgraded to no-action.
-- New this session: **F21** (scrypt legacy-default magic numbers duplicated
-  across two DDL strings) and **F22** (one test is inherently more
-  flake-prone than the rest of the suite, noted for future triage context).
+- **F21** (fixed this session): scrypt legacy-default magic numbers
+  (`32768, 8, 1`) were duplicated across two DDL strings and two test
+  literals. Now a single `legacyScryptN/R/P` constant trio, interpolated
+  into both DDL strings and referenced by both test literals.
+- New this session: **F22** (one test is inherently more flake-prone than
+  the rest of the suite, noted for future triage context).
 
 ## Architectural mental model
 
@@ -67,7 +70,7 @@ audit round.
 | F13 | ✅ Fixed (this session) | Architectural decay | cmd/doppler-backup/main.go:88-104 | Low-Medium | S-M | `dbPath` was a package-level mutable global read by every `run*` function; `main_test.go` mutated it directly via a save/restore helper. Safe only because no test called `t.Parallel()`. | Fixed: `dbPath` is now a local variable in `main()`, passed as a `*string` into each `newXCmd` constructor and dereferenced inside `RunE`; `run*`/`openStoreAndKey` take `dbPath` as an explicit parameter instead of reading a global. Tests now pass the path explicitly (`setTestDB` returns it; no global mutation). Verified: full test suite passes, including the child-process `TestRestoreCleansUpTempFileOnSignal` which now passes `dbPath` as a local var read from its env var instead of assigning a package global. |
 | F19 | ✅ Fixed (this session) | Security hygiene | internal/store/store.go:38-63 | High | S | `store.Open` calls `sql.Open` then `s.migrate()` (file created on first `Exec`), and only called `os.Chmod(path, 0o600)` afterward. Reproduced directly: under `umask 0002`, the file was `0644` (world-readable) in the window between creation and chmod on every `backup`/`restore`/`list`/`rotate` run against a not-yet-existing DB. | Fixed: `Open` now pre-creates the file via `os.OpenFile(path, os.O_RDWR\|os.O_CREATE, 0o600)` (and re-chmods for pre-existing files with looser permissions) before `sql.Open`/`migrate` ever touch it, closing the window. Verified: `TestOpenNeverCreatesFileUnderLoosePermissions` in `store_test.go` opens a fresh DB under `umask 0002` and asserts `0600` immediately. |
 | F20 | ✅ Fixed (this session) | Consistency rot / reuse | cmd/doppler-backup/main.go:106-166 | Medium | S | `resolvePassphrase`, `resolveEncryptPassphrase`, `resolveNewPassphrase` (current shape post-dates the 2026-07-10 audit) duplicated: check flag value, check `term.IsTerminal`, error via `errPassphraseRequired`, prompt, reject blank — differing only in strength validation and confirmation. | Fixed: all three now delegate to a shared `resolveWithPrompt(flagValue, promptLabel, flagName string, validate func(string) error, confirmLabel string) (string, error)`, parameterized by a `validate` func (`noopValidate` or `validatePassphraseStrength`) and an optional confirmation prompt label. Verified: existing `TestResolvePassphrase`/`TestResolveEncryptPassphrase`/`TestResolveNewPassphrase`/`TestNonInteractivePassphraseRequired` all pass unchanged, confirming behavior parity. |
-| F21 | **NEW** | Consistency rot | internal/store/store.go:64 and :115 | Low | S | Scrypt's legacy "interactive" defaults (`32768, 8, 1`) are hardcoded in two raw SQL DDL strings (`CREATE TABLE` default, `ALTER TABLE ADD COLUMN` backfill), and mirrored again in `store_test.go:11,267` and `crypto.go:29`'s comment. Four places that could drift with no compiler check. | Not urgent (historical constants that must never change), but a named Go constant interpolated into both DDL strings would remove the duplication risk. |
+| F21 | ✅ Fixed (this session) | Consistency rot | internal/store/store.go:36-44 | Low | S | Scrypt's legacy "interactive" defaults (`32768, 8, 1`) were hardcoded in two raw SQL DDL strings (`CREATE TABLE` default, `ALTER TABLE ADD COLUMN` backfill), and mirrored again in `store_test.go:12,268`. Four places that could drift with no compiler check. | Fixed: added `legacyScryptN`/`legacyScryptR`/`legacyScryptP` constants in `store.go`, interpolated into both DDL strings via `fmt.Sprintf`, and referenced by both `store_test.go` literals instead of restating the values. `crypto.go:29`'s comment (prose, not a literal) is unchanged. Verified: `TestOpenMigratesPreKDFParamsDatabase` (which asserts the legacy backfill value) still passes. |
 | F14 | Open (carried forward, unchanged, non-issue at current scale) | Performance | internal/crypto/crypto.go:88-98 (`newGCM`) | Low | — | Rebuilds the AES block cipher + GCM wrapper on every `Encrypt`/`Decrypt` call rather than caching per key. Immaterial — call volume is bounded by configs-per-run, not a hot loop. | No action needed; flagged so it isn't copy-pasted into a hot path elsewhere unnoticed. |
 | F15 | Open (carried forward, unchanged) | Observability | cmd/doppler-backup/main.go:269,275 | Low | — | Backup failures print human text to stderr (`skipping project %s: %v`) rather than structured logs — fine for manual/cron use with captured output, no machine-parseable failure detail. | Only worth addressing if a future requirement needs machine-readable failure reporting. |
 | F22 | **NEW** | Test debt | cmd/doppler-backup/main_test.go:272-318 | Low | S | `TestRestoreCleansUpTempFileOnSignal` polls a file for up to 5s in 20ms increments and re-execs the test binary to catch a SIGINT race — more flake-prone under CI contention than the rest of the (fast, deterministic) suite. | Leave as-is unless observed to flake; it's the only way to exercise this path. Noted so a future flaky-test report isn't a mystery. |
@@ -93,8 +96,9 @@ audit round.
    session). `dbPath` is now threaded explicitly through every function
    signature instead of read from a package global, closing off the
    intermittent-failure risk a future `t.Parallel()` would have exposed.
-4. **F21 — name the scrypt legacy-default constant.** Cheap, bundle with
-   F19 while `store.go` is already open.
+4. ~~**F21 — name the scrypt legacy-default constant.**~~ ✅ Fixed (this
+   session). `legacyScryptN`/`R`/`P` constants now back both DDL strings and
+   both test literals.
 5. **F22 — no action required, but keep in mind.** Not a code fix; listed
    as a Top 5 item only in the sense of "know this before you see a flaky
    CI run and go hunting."
@@ -103,8 +107,8 @@ audit round.
 
 - [x] F19: Pre-create the backup DB file at `0o600` before `sql.Open`/migrate
       (High severity, S effort) — fixed this session.
-- [ ] F21: Extract `32768, 8, 1` into a named constant shared by both DDL
-      statements (Low severity, S effort)
+- [x] F21: Extract `32768, 8, 1` into a named constant shared by both DDL
+      statements (Low severity, S effort) — fixed this session.
 - [x] F13: Thread `dbPath` through `run*` signatures instead of a package
       global (Low-Medium severity, S-M effort) — fixed this session.
 
