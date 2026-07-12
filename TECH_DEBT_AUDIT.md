@@ -48,8 +48,11 @@ resolve correctly against that document. Retracted; not listed below.
   (`32768, 8, 1`) were duplicated across two DDL strings and two test
   literals. Now a single `legacyScryptN/R/P` constant trio, interpolated
   into both DDL strings and referenced by both test literals.
-- New this session: **F22** (one test is inherently more flake-prone than
-  the rest of the suite, noted for future triage context).
+- **F22** (fixed this session): `TestRestoreCleansUpTempFileOnSignal` polled
+  a file every 20ms for up to 5s to detect child-process readiness. Replaced
+  with a blocking read on a pipe (fd 3, inherited via `cmd.ExtraFiles`) that
+  the child writes to the instant the temp file exists — event-driven
+  instead of sampled, with a 5s timeout retained only as a hang guard.
 
 ## Architectural mental model
 
@@ -73,7 +76,7 @@ audit round.
 | F21 | ✅ Fixed (this session) | Consistency rot | internal/store/store.go:36-44 | Low | S | Scrypt's legacy "interactive" defaults (`32768, 8, 1`) were hardcoded in two raw SQL DDL strings (`CREATE TABLE` default, `ALTER TABLE ADD COLUMN` backfill), and mirrored again in `store_test.go:12,268`. Four places that could drift with no compiler check. | Fixed: added `legacyScryptN`/`legacyScryptR`/`legacyScryptP` constants in `store.go`, interpolated into both DDL strings via `fmt.Sprintf`, and referenced by both `store_test.go` literals instead of restating the values. `crypto.go:29`'s comment (prose, not a literal) is unchanged. Verified: `TestOpenMigratesPreKDFParamsDatabase` (which asserts the legacy backfill value) still passes. |
 | F14 | Open (carried forward, unchanged, non-issue at current scale) | Performance | internal/crypto/crypto.go:88-98 (`newGCM`) | Low | — | Rebuilds the AES block cipher + GCM wrapper on every `Encrypt`/`Decrypt` call rather than caching per key. Immaterial — call volume is bounded by configs-per-run, not a hot loop. | No action needed; flagged so it isn't copy-pasted into a hot path elsewhere unnoticed. |
 | F15 | Open (carried forward, unchanged) | Observability | cmd/doppler-backup/main.go:269,275 | Low | — | Backup failures print human text to stderr (`skipping project %s: %v`) rather than structured logs — fine for manual/cron use with captured output, no machine-parseable failure detail. | Only worth addressing if a future requirement needs machine-readable failure reporting. |
-| F22 | **NEW** | Test debt | cmd/doppler-backup/main_test.go:272-318 | Low | S | `TestRestoreCleansUpTempFileOnSignal` polls a file for up to 5s in 20ms increments and re-execs the test binary to catch a SIGINT race — more flake-prone under CI contention than the rest of the (fast, deterministic) suite. | Leave as-is unless observed to flake; it's the only way to exercise this path. Noted so a future flaky-test report isn't a mystery. |
+| F22 | ✅ Fixed (this session) | Test debt | cmd/doppler-backup/main_test.go:267-337 | Low | S | `TestRestoreCleansUpTempFileOnSignal` polled a file for up to 5s in 20ms increments and re-execs the test binary to catch a SIGINT race — more flake-prone under CI contention than the rest of the (fast, deterministic) suite. | Fixed: the child now reports the temp file path over a pipe inherited as fd 3 (`cmd.ExtraFiles`) the instant it exists, and the parent blocks on a single `bufio.Reader.ReadString` read (wrapped in a `select` against a 5s timer as a hang guard) instead of sampling on a fixed cadence. Verified: `go test -run TestRestoreCleansUpTempFileOnSignal -race -count=5` passes consistently, each run completing in well under 150ms. |
 | F16 | Open (carried forward, re-verified, no drift) | Documentation drift | README.md:13, go.mod:3 | Low | — | README says "Go 1.26+"; go.mod now pins `go 1.26.5` (bumped since the prior audit's `1.26.4`, per F11). Still consistent. | Keep in sync on future toolchain bumps. |
 | F17 | Open (carried forward, unchanged, expected) | Test debt (very minor) | cmd/doppler-backup/main.go:88-104 (`main`) | Low | — | `main()` itself is untested, as typical for Go `main` functions — all logic lives in the tested `run*` functions it calls. | No action; noted for completeness. |
 | F18 | Improved — downgraded to no-action | Config debt | testresults/, godocs/ | Low | — | Previously flagged because `testresults/*.json` was empty on all recorded runs (root cause was F03). Now: 5 runs on disk, 44–58KB each, non-empty; `godocs/index.html` is current as of the latest `build.sh` run. No longer stale. | None. |
@@ -99,9 +102,9 @@ audit round.
 4. ~~**F21 — name the scrypt legacy-default constant.**~~ ✅ Fixed (this
    session). `legacyScryptN`/`R`/`P` constants now back both DDL strings and
    both test literals.
-5. **F22 — no action required, but keep in mind.** Not a code fix; listed
-   as a Top 5 item only in the sense of "know this before you see a flaky
-   CI run and go hunting."
+5. ~~**F22 — de-flake the signal-cleanup test.**~~ ✅ Fixed (this session).
+   Replaced the 20ms-poll/5s-timeout loop with a blocking pipe read; no
+   longer a "know this before you see a flaky CI run" item.
 
 ## Quick wins
 

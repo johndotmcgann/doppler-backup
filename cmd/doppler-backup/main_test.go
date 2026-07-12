@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"log"
 	"os"
@@ -264,6 +265,12 @@ func TestRunRestoreWithClientLatestSnapshot(t *testing.T) {
 // is gone once the child exits. This exercises the actual cleanup path
 // (main.go's signal.Notify/os.Exit), which a plain unit test can't reach
 // since it requires killing a real process.
+//
+// The child reports the temp file's path over a pipe (inherited as fd 3)
+// the instant it's created, rather than the parent polling a file on a
+// fixed cadence: a blocking read reacts immediately and has no timing
+// window to tune, so it isn't prone to the under-CI-load flakiness a
+// poll-with-timeout loop is.
 func TestRestoreCleansUpTempFileOnSignal(t *testing.T) {
 	if os.Getenv("DOPPLER_BACKUP_SIGTEST_CHILD") == "1" {
 		signalTestChildMain()
@@ -271,33 +278,50 @@ func TestRestoreCleansUpTempFileOnSignal(t *testing.T) {
 	}
 
 	sigDBPath := filepath.Join(t.TempDir(), "sig.db")
-	pathFile := filepath.Join(t.TempDir(), "tmp-path.txt")
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create notify pipe: %v", err)
+	}
+	defer r.Close()
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestRestoreCleansUpTempFileOnSignal$")
 	cmd.Env = append(os.Environ(),
 		"DOPPLER_BACKUP_SIGTEST_CHILD=1",
 		"DOPPLER_BACKUP_SIGTEST_DB="+sigDBPath,
-		"DOPPLER_BACKUP_SIGTEST_PATHFILE="+pathFile,
 	)
+	cmd.ExtraFiles = []*os.File{w}
 	if err := cmd.Start(); err != nil {
+		w.Close()
 		t.Fatalf("start child: %v", err)
 	}
+	w.Close() // parent's copy; the child holds its own duped fd 3
+
+	type readResult struct {
+		line string
+		err  error
+	}
+	lineCh := make(chan readResult, 1)
+	go func() {
+		line, err := bufio.NewReader(r).ReadString('\n')
+		lineCh <- readResult{line, err}
+	}()
 
 	var tempPath string
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		b, err := os.ReadFile(pathFile)
-		if err == nil && len(b) > 0 {
-			tempPath = string(b)
-			break
+	select {
+	case res := <-lineCh:
+		if res.err != nil {
+			cmd.Process.Kill()
+			cmd.Wait()
+			t.Fatalf("read temp file path from child: %v", res.err)
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if tempPath == "" {
+		tempPath = strings.TrimSuffix(res.line, "\n")
+	case <-time.After(5 * time.Second):
 		cmd.Process.Kill()
 		cmd.Wait()
 		t.Fatalf("child never reported a temp file path")
 	}
+
 	if _, err := os.Stat(tempPath); err != nil {
 		t.Fatalf("expected temp file to exist before signal: %v", err)
 	}
@@ -313,11 +337,10 @@ func TestRestoreCleansUpTempFileOnSignal(t *testing.T) {
 }
 
 // signalTestChildMain seeds a snapshot and restores it via a client whose
-// UploadSecrets reports the temp file path and stalls, giving the parent
-// test a window to deliver SIGINT.
+// UploadSecrets reports the temp file path over fd 3 and stalls, giving the
+// parent test a window to deliver SIGINT.
 func signalTestChildMain() {
 	dbPath := os.Getenv("DOPPLER_BACKUP_SIGTEST_DB")
-	pathFile := os.Getenv("DOPPLER_BACKUP_SIGTEST_PATHFILE")
 
 	st, err := store.Open(dbPath)
 	if err != nil {
@@ -340,16 +363,17 @@ func signalTestChildMain() {
 	}
 	st.Close()
 
-	client := &slowUploadClient{pathFile: pathFile}
+	client := &slowUploadClient{notify: os.NewFile(3, "notify-pipe")}
 	if err := runRestoreWithClient(client, dbPath, "proj", "dev", "passphrase", 0); err != nil {
 		log.Fatalf("restore: %v", err)
 	}
 }
 
-// slowUploadClient reports the temp file path it was handed and then stalls,
-// simulating an upload that's still in flight when a signal arrives.
+// slowUploadClient reports the temp file path it was handed over notify and
+// then stalls, simulating an upload that's still in flight when a signal
+// arrives.
 type slowUploadClient struct {
-	pathFile string
+	notify *os.File
 }
 
 func (c *slowUploadClient) ListProjects() ([]doppler.Project, error) { return nil, nil }
@@ -360,7 +384,7 @@ func (c *slowUploadClient) DownloadSecrets(string, string) (map[string]string, e
 	return nil, nil
 }
 func (c *slowUploadClient) UploadSecrets(_, _, path string) error {
-	if err := os.WriteFile(c.pathFile, []byte(path), 0o600); err != nil {
+	if _, err := c.notify.WriteString(path + "\n"); err != nil {
 		return err
 	}
 	time.Sleep(3 * time.Second)
