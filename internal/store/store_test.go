@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -267,6 +268,30 @@ func TestOpenMigratesPreKDFParamsDatabase(t *testing.T) {
 	want := KDFParams{N: 32768, R: 8, P: 1}
 	if params != want {
 		t.Fatalf("expected legacy scrypt defaults backfilled as %+v, got %+v", want, params)
+	}
+}
+
+// TestOpenNeverCreatesFileUnderLoosePermissions guards against the file
+// being briefly created under the process umask (e.g. world-readable)
+// before being locked down to 0600 — Open must create it at 0600 from the
+// start rather than creating then chmod'ing.
+func TestOpenNeverCreatesFileUnderLoosePermissions(t *testing.T) {
+	old := syscall.Umask(0o002)
+	defer syscall.Umask(old)
+
+	path := filepath.Join(t.TempDir(), "perm.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat db file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("expected db file permissions 0o600 even under a permissive umask, got %o", perm)
 	}
 }
 

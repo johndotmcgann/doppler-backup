@@ -36,6 +36,21 @@ type KDFParams struct {
 // Open opens (creating if necessary) the SQLite database at path, ensures
 // its schema exists, and locks the file down to owner-only permissions.
 func Open(path string) (*Store, error) {
+	// Pre-create (or verify) the file at 0600 before sql.Open/migrate ever
+	// touches it, so a fresh database is never briefly created under the
+	// process umask (e.g. world-readable) before permissions are locked
+	// down.
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return nil, fmt.Errorf("restrict database permissions: %w", err)
+	}
+
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
@@ -44,10 +59,6 @@ func Open(path string) (*Store, error) {
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("restrict database permissions: %w", err)
 	}
 	return s, nil
 }
