@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The backup SQLite database could briefly be created under the process
+  umask (e.g. world-readable) before `store.Open` locked it down to
+  `0600`. The file is now created at `0600` from the start, closing that
+  window.
+
+### Changed
+
+- Consolidated the three passphrase-resolution functions
+  (`resolvePassphrase`, `resolveEncryptPassphrase`, `resolveNewPassphrase`)
+  into a single shared helper parameterized by a validation function and an
+  optional confirmation prompt.
+- `dbPath` is no longer a package-level global; it's threaded explicitly
+  through the `run*` functions and command constructors, removing a latent
+  hazard for future parallel tests.
+- Scrypt's legacy "interactive" defaults (`32768`/`8`/`1`), previously
+  duplicated across two SQL DDL strings and two test files, are now backed
+  by a single named constant.
+- De-flaked `TestRestoreCleansUpTempFileOnSignal`: the child process now
+  reports its temp file path over a pipe the instant it exists, instead of
+  the parent polling for up to 5 seconds.
+
 ## [0.9.0] - 2026-07-11
 
 ### Added
