@@ -26,8 +26,10 @@ go test ./internal/crypto/... -run TestDeriveKey -v
 
 `build.sh` is the production build script (version bump via `--major`/`--minor`/`--patch`,
 runs vet + tests, builds with `-ldflags -X main.Version=<tag>`, copies the binary to
-`$HOME/Executables`, and regenerates `godocs/` via `godoc`). It's not needed for routine
-development — `make build`/`make test` are the day-to-day commands.
+`$HOME/Executables`). It's not needed for routine development — `make build`/`make test` are
+the day-to-day commands. `godocs.sh` is a separate, optional script that regenerates local
+`godocs/` HTML via `godoc`; it's not part of the production build since pkg.go.dev indexes
+the public module automatically.
 
 ## Architecture
 
