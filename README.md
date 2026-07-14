@@ -10,16 +10,42 @@ restore any snapshot back into Doppler.
 
 ## Prerequisites
 
-- Go 1.26+
 - The [`doppler` CLI](https://docs.doppler.com/docs/install-cli), version
   3.76.0 or newer, installed and authenticated (`doppler login`) —
   `doppler-backup` shells out to it rather than talking to the Doppler API
   directly. `backup` and `restore` check the installed CLI's version up
   front and fail fast with a clear error if it's too old.
+- Go 1.26+ — only needed if building from source; skip it if you're using a
+  prebuilt binary.
 
-## Build
+## Install
+
+### Download a prebuilt binary
+
+Each [GitHub Release](https://github.com/johndotmcgann/doppler-backup/releases/latest)
+has binaries for Linux, macOS, and Windows attached. Download the asset that
+matches your OS/architecture, e.g. for release `vX.Y.Z`:
+
+| OS      | Architecture   | Asset                                  |
+|---------|----------------|-----------------------------------------|
+| macOS   | Apple Silicon  | `doppler-backup-vX.Y.Z-darwin-arm64`   |
+| macOS   | Intel          | `doppler-backup-vX.Y.Z-darwin-amd64`   |
+| Linux   | amd64          | `doppler-backup-vX.Y.Z-linux-amd64`    |
+| Linux   | arm64          | `doppler-backup-vX.Y.Z-linux-arm64`    |
+| Windows | amd64          | `doppler-backup-vX.Y.Z-windows-amd64.exe` |
+
+On Linux/macOS, mark the download executable and move it onto your `$PATH`:
 
 ```sh
+chmod +x doppler-backup-vX.Y.Z-<os>-<arch>
+mv doppler-backup-vX.Y.Z-<os>-<arch> /usr/local/bin/doppler-backup
+```
+
+### Build from source
+
+```sh
+git clone https://github.com/johndotmcgann/doppler-backup.git
+cd doppler-backup
 make build          # produces bin/doppler-backup
 make install         # go install into $GOPATH/bin
 ```
