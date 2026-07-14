@@ -1,0 +1,51 @@
+name: Release
+
+# Requires a GitHub Release to already exist for the pushed tag (created
+# manually, e.g. `gh release create v1.2.3`) — this workflow only builds and
+# attaches binaries to it, it does not create the release itself.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.5'
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          EXT=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
+          OUT="doppler-backup-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
+          mkdir -p dist
+          go build -ldflags "-X main.Version=${{ github.ref_name }}" -o "dist/${OUT}" ./cmd/doppler-backup
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" dist/* --clobber
