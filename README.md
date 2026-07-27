@@ -8,6 +8,19 @@ it snapshots every secret in every project/config into a SQLite database,
 encrypted at rest with AES-256-GCM under a passphrase you choose, and can
 restore any snapshot back into Doppler.
 
+## Who may need this?
+
+Anyone using the 'developer' Doppler account for secrets management
+with applications (e.g. solo developers, very small teams).
+This application was developed against the features of a
+'developer' Doppler account.
+
+There may be features in a Doppler 'teams' or 'enterprise'
+account that may be suitable for inclusion in this type of application.
+I'm happy for this project to be cloned or forked in that
+regard for someone to add missing features for the
+'teams' or 'enterprise' Doppler account types.
+
 ## Prerequisites
 
 - The [`doppler` CLI](https://docs.doppler.com/docs/install-cli), version
