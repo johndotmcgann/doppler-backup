@@ -1,5 +1,10 @@
 # doppler-backup
 
+[![CI](https://github.com/johndotmcgann/doppler-backup/actions/workflows/ci.yml/badge.svg)](https://github.com/johndotmcgann/doppler-backup/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/johndotmcgann/doppler-backup)](https://github.com/johndotmcgann/doppler-backup/releases/latest)
+[![Go Reference](https://pkg.go.dev/badge/github.com/johndotmcgann/doppler-backup.svg)](https://pkg.go.dev/github.com/johndotmcgann/doppler-backup)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Emergency backup/restore for [Doppler](https://www.doppler.com) secrets.
 
 Doppler keeps per-secret version history and an activity log, but **it
