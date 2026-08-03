@@ -5,7 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-08-03
+
+First stable release, coinciding with the repository going public.
+
+### Added
+
+- GitHub Actions CI workflow (runs `go vet` and `go test ./...` on push/PR)
+  and a release workflow that builds and attaches binaries to GitHub
+  Releases on tag push.
+- README documentation on prebuilt binary downloads, building from source,
+  and who this application is suitable for.
+
+### Changed
+
+- Split godoc HTML generation out of `build.sh` into a separate
+  `godocs.sh` script; it's no longer part of the production build since
+  pkg.go.dev indexes the public module automatically.
+- Bumped `actions/checkout` and `actions/setup-go` to v7 in CI workflows.
+
+## [0.10.0] - 2026-07-12
 
 ### Fixed
 
