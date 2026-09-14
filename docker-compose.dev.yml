@@ -1,0 +1,74 @@
+# doppler-backup workspace container. SQLite-only project (its own encrypted
+# backup database lives wherever the CLI's --db-path/output flag points) -
+# no DB service needed. It shells out to the `doppler` CLI at runtime
+# (baked into dev-base) using the operator's own `doppler login` session,
+# not secrets injected via `doppler run`, so this compose file needs no
+# Doppler project either - same pattern as taxyear/changeofdetails/bmm-go.
+# See Dockerfile.dev-go (GO_VERSION=1.26.5 to match go.mod).
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d
+#   docker exec -it doppler-backup-workspace-1 bash
+#   docker exec -it doppler-backup-workspace-1 doppler login   # one-time, to use `backup`/`restore` for real
+
+services:
+  workspace:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev-go
+    volumes:
+      - .:/workspace
+      - claude-config:/root/.claude
+      # Claude Code's real config file is /root/.claude.json (a file, not
+      # inside /root/.claude/), so it sits outside this volume by default.
+      # The startup command below symlinks it into the volume so login
+      # persists across containers/projects like the rest of claude-config.
+      - opencode-config:/root/.local/share/opencode
+      # opencode's real credential store is ~/.local/share/opencode/auth.json
+      # (confirmed via `opencode auth list`), NOT ~/.config/opencode (which
+      # only holds plugin config/node_modules) - mounting the shared volume
+      # there means logins were silently not persisting across rebuilds.
+      - pi-config:/root/.pi
+      # Read-only: reuses the droplet's github_cde key/config from Step 3.
+      # Mounted to a staging path, not /root/.ssh directly — OpenSSH rejects
+      # key/config files whose owner (the host's non-root user) doesn't
+      # match the connecting user (root) or root itself.
+      - ~/.ssh:/root/.ssh-host:ro
+    working_dir: /workspace
+    tty: true
+    stdin_open: true
+    entrypoint: ["/bin/bash", "-c"]
+    environment:
+      # Optional: if set, the startup command below writes it into
+      # opencode's and Pi's real credential files, skipping their
+      # interactive login flow. Unset here is a no-op.
+      - OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}
+    command:
+      - >
+        mkdir -p /root/.ssh &&
+        cp -r /root/.ssh-host/. /root/.ssh/ &&
+        chown -R root:root /root/.ssh &&
+        chmod 700 /root/.ssh &&
+        find /root/.ssh -type f -exec chmod 600 {} \; &&
+        ln -sf /root/.claude/claude.json /root/.claude.json &&
+        mkdir -p /root/.local/share/opencode /root/.pi/agent &&
+        if [ -n "$$OPENCODE_ZEN_API_KEY" ]; then
+          node -e "require('fs').writeFileSync(process.env.HOME+'/.local/share/opencode/auth.json', JSON.stringify({opencode:{type:'api',key:process.env.OPENCODE_ZEN_API_KEY}}, null, 2))" &&
+          node -e "require('fs').writeFileSync(process.env.HOME+'/.pi/agent/auth.json', JSON.stringify({opencode:{type:'api_key',key:process.env.OPENCODE_ZEN_API_KEY}}, null, 2))";
+        fi &&
+        exec tail -f /dev/null
+    networks:
+      - devnet
+
+networks:
+  devnet:
+
+volumes:
+  # Shared across all projects on the host so AI harness auth persists
+  # between container rebuilds without re-login each time.
+  claude-config:
+    external: true
+  opencode-config:
+    external: true
+  pi-config:
+    external: true

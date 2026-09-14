@@ -1,0 +1,24 @@
+# Go project workspace. Builds on the shared dev-base image
+# (see Dockerfile.base) so AI harnesses/tooling are already present.
+#
+#   docker build -t dev-base:latest -f Dockerfile.base .   # once, or when updating tools
+#   docker build -t <project>-workspace:latest -f Dockerfile.dev-go .
+#
+# Bump GO_VERSION per project as needed.
+
+FROM dev-base:latest
+
+ARG GO_VERSION=1.26.5
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -o /tmp/go.tar.gz \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz
+
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH="/home/dev/go"
+ENV PATH="${GOPATH}/bin:${PATH}"
+
+WORKDIR /workspace
+
+CMD ["tail", "-f", "/dev/null"]
