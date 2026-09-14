@@ -77,14 +77,6 @@ go build -v \
     -o "bin/doppler-backup" \
     ./cmd/doppler-backup
 
-# Copy the binary to ~/Executables for use outside the project directory.
-# Opt-in only: this step is specific to the maintainer's local setup.
-if [ "${INSTALL_LOCAL:-0}" = "1" ]; then
-    mkdir -p "$HOME/Executables"
-    cp bin/doppler-backup "$HOME/Executables/doppler-backup"
-    printf 'Copied binary to %s/Executables/doppler-backup\n' "$HOME"
-fi
-
 printf '\nRun the application with:\n'
 printf '  ./bin/doppler-backup backup --passphrase <passphrase>\n'
 printf '  ./bin/doppler-backup restore --project <p> --config <c> --passphrase <passphrase>\n'
