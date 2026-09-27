@@ -19,6 +19,26 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 ENV GOPATH="/home/dev/go"
 ENV PATH="${GOPATH}/bin:${PATH}"
 
+# govulncheck and godoc are small, single-purpose tools - go install is fine.
+RUN go install golang.org/x/vuln/cmd/govulncheck@latest \
+    && go install golang.org/x/tools/cmd/godoc@latest
+
+# golangci-lint via go install compiles its full dependency graph, which is
+# heavy on this droplet's 1 vCPU/2GB, so fetch the prebuilt release binary
+# instead - no compile-from-source. Not using golangci-lint's own install.sh:
+# as of v2.14.0 its checksum lookup matches the wrong checksums.txt entry
+# (the fixed line search below picks a single asset by matching to end of
+# line, so it can't be confused by the neighboring .tar.gz.sbom.json entry).
+RUN GOLANGCI_LINT_VERSION="$(curl -fsSL https://api.github.com/repos/golangci/golangci-lint/releases/latest | jq -r .tag_name)" \
+    && GOLANGCI_LINT_VER_NUM="${GOLANGCI_LINT_VERSION#v}" \
+    && cd /tmp \
+    && curl -fsSLO "https://github.com/golangci/golangci-lint/releases/download/${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VER_NUM}-linux-amd64.tar.gz" \
+    && curl -fsSL "https://github.com/golangci/golangci-lint/releases/download/${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VER_NUM}-checksums.txt" -o checksums.txt \
+    && grep -E "golangci-lint-${GOLANGCI_LINT_VER_NUM}-linux-amd64\.tar\.gz$" checksums.txt | sha256sum -c - \
+    && tar -xzf "golangci-lint-${GOLANGCI_LINT_VER_NUM}-linux-amd64.tar.gz" \
+    && mv "golangci-lint-${GOLANGCI_LINT_VER_NUM}-linux-amd64/golangci-lint" "${GOPATH}/bin/golangci-lint" \
+    && rm -rf /tmp/golangci-lint*
+
 WORKDIR /workspace
 
 CMD ["tail", "-f", "/dev/null"]
