@@ -204,6 +204,24 @@ func TestRunBackupWithClientTooOldVersionFailsFast(t *testing.T) {
 	}
 }
 
+func TestRunBackupWithClientVersionCheckErrorFailsFast(t *testing.T) {
+	dbPath := setTestDB(t)
+
+	versionErr := errors.New("exec: \"doppler\": executable file not found in $PATH")
+	client := &fakeClient{
+		versionErr:      versionErr,
+		listProjectsErr: errors.New("ListProjects should not be called when the version check fails"),
+	}
+
+	err := runBackupWithClient(client, dbPath, "", "passphrase")
+	if err == nil {
+		t.Fatalf("expected error when the doppler CLI's version can't be determined")
+	}
+	if !errors.Is(err, versionErr) {
+		t.Fatalf("expected the version-check error to propagate, got %v", err)
+	}
+}
+
 func TestRunRestoreWithClientTooOldVersionFailsFast(t *testing.T) {
 	dbPath := setTestDB(t)
 
@@ -211,6 +229,24 @@ func TestRunRestoreWithClientTooOldVersionFailsFast(t *testing.T) {
 
 	if err := runRestoreWithClient(client, dbPath, "proj", "dev", "passphrase", 0); err == nil {
 		t.Fatalf("expected error for too-old doppler CLI version")
+	}
+	if client.uploadedProject != "" {
+		t.Fatalf("expected UploadSecrets to not be called when the version check fails")
+	}
+}
+
+func TestRunRestoreWithClientVersionCheckErrorFailsFast(t *testing.T) {
+	dbPath := setTestDB(t)
+
+	versionErr := errors.New("exec: \"doppler\": executable file not found in $PATH")
+	client := &fakeClient{versionErr: versionErr}
+
+	err := runRestoreWithClient(client, dbPath, "proj", "dev", "passphrase", 0)
+	if err == nil {
+		t.Fatalf("expected error when the doppler CLI's version can't be determined")
+	}
+	if !errors.Is(err, versionErr) {
+		t.Fatalf("expected the version-check error to propagate, got %v", err)
 	}
 	if client.uploadedProject != "" {
 		t.Fatalf("expected UploadSecrets to not be called when the version check fails")

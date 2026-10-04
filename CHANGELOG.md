@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directory existing doesn't guarantee it's usable (it can be read-only,
   full, or mounted with restrictive permissions in a container or CI
   sandbox), and the restore previously aborted outright in that case.
+### Fixed
+
+- Added test coverage for the case where `backup`/`restore` can't determine
+  the installed doppler CLI version (e.g. the binary is missing from `PATH`);
+  the version check's error path is now exercised instead of going untested.
 
 ## [1.0.0] - 2026-08-03
 
