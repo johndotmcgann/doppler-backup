@@ -39,6 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added test coverage for the case where `backup`/`restore` can't determine
   the installed doppler CLI version (e.g. the binary is missing from `PATH`);
   the version check's error path is now exercised instead of going untested.
+### Changed
+
+- Bumped the Go directive to 1.26.6 and `golang.org/x/crypto` to v0.56.0,
+  clearing all `govulncheck` advisories except the unmaintained
+  `x/crypto/openpgp` package, which is not imported and has no fixed
+  version. `DeriveKey` output is unchanged, so existing databases still
+  decrypt.
 
 ## [1.0.0] - 2026-08-03
 

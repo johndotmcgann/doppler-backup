@@ -8,7 +8,7 @@
 
 FROM dev-base:latest
 
-ARG GO_VERSION=1.26.5
+ARG GO_VERSION=1.26.6
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -o /tmp/go.tar.gz \
