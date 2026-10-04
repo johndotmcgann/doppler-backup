@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `build.sh`'s header comment no longer claims the script "always builds and
+  installs the executable to $HOME/Executables"; that install step was removed
+  earlier and the script only vets, tests, and builds to `bin/` now.
+
 ## [1.0.0] - 2026-08-03
 
 First stable release, coinciding with the repository going public.

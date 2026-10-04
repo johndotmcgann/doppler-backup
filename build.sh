@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Production build script for doppler-backup.
-# Always builds and installs the executable to $HOME/Executables.
+# Runs go vet and the tests, then builds the executable to
+# bin/doppler-backup.
 #
 set -e
 set -o pipefail
