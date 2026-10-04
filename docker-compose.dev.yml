@@ -4,7 +4,7 @@
 # (baked into dev-base) using the operator's own `doppler login` session,
 # not secrets injected via `doppler run`, so this compose file needs no
 # Doppler project either - same pattern as taxyear/changeofdetails/bmm-go.
-# See Dockerfile.dev-go (GO_VERSION=1.26.5 to match go.mod).
+# See Dockerfile.dev-go (GO_VERSION=1.26.6 to match go.mod).
 #
 # Usage:
 #   docker compose -f docker-compose.dev.yml up -d

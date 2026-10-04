@@ -1,6 +1,9 @@
 package crypto
 
-import "testing"
+import (
+	"encoding/hex"
+	"testing"
+)
 
 // testParams uses a much smaller N than DefaultParams so the test suite
 // doesn't pay real scrypt work-factor cost on every DeriveKey call.
@@ -149,6 +152,53 @@ func TestDecryptTamperedNonceFails(t *testing.T) {
 
 	if _, err := Decrypt(key, tampered, ciphertext); err == nil {
 		t.Fatalf("expected decrypt with tampered nonce to fail")
+	}
+}
+
+// TestDeriveKeyKnownAnswer locks DeriveKey to fixed output. Snapshots written
+// by an earlier version are only decryptable if scrypt keeps deriving the exact
+// same bytes for the same passphrase/salt/params, so any dependency bump that
+// changes scrypt's output would silently orphan every existing database. If
+// this test fails, an intentional re-derivation (and a migration) is required.
+func TestDeriveKeyKnownAnswer(t *testing.T) {
+	cases := []struct {
+		passphrase string
+		salt       string
+		params     Params
+		want       string
+	}{
+		{
+			passphrase: "correct horse",
+			salt:       "0123456789abcdef",
+			params:     testParams,
+			want:       "380919a9405e946e9521875325f61210d2f93a6651c4c6b71b05e7e681658938",
+		},
+		{
+			// Empty passphrase still has to derive deterministically.
+			passphrase: "",
+			salt:       "0123456789abcdef",
+			params:     testParams,
+			want:       "b7816a6737774ae86e29060f5411c2823afbee15c4805a1aa17801e14bef4084",
+		},
+		{
+			// Same shape as DefaultParams, reduced N so the test stays fast.
+			// Pins that the work factor is part of the derived key.
+			passphrase: "doppler-backup-prod-shape",
+			salt:       "0123456789abcdef",
+			params:     Params{N: 1 << 15, R: 8, P: 2},
+			want:       "93f5f9a38ed95edca2f5a87d2764506438a128b378e479af1ac5c38cf20fcf3d",
+		},
+	}
+
+	for _, tc := range cases {
+		got, err := DeriveKey(tc.passphrase, []byte(tc.salt), tc.params)
+		if err != nil {
+			t.Fatalf("derive key: %v", err)
+		}
+		if hex.EncodeToString(got) != tc.want {
+			t.Errorf("passphrase %q params %+v:\n got %s\nwant %s",
+				tc.passphrase, tc.params, hex.EncodeToString(got), tc.want)
+		}
 	}
 }
 
