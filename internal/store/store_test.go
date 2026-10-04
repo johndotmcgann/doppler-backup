@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 var testKDFParams = KDFParams{N: legacyScryptN, R: legacyScryptR, P: legacyScryptP}
@@ -309,5 +310,79 @@ func TestOpenRestrictsFilePermissions(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Fatalf("expected db file permissions 0o600, got %o", perm)
+	}
+}
+
+func TestOpenSetsBusyTimeout(t *testing.T) {
+	st := openTestStore(t)
+
+	var got int
+	if err := st.db.QueryRow(`PRAGMA busy_timeout`).Scan(&got); err != nil {
+		t.Fatalf("read busy_timeout: %v", err)
+	}
+	if got != busyTimeoutMS {
+		t.Fatalf("expected busy_timeout %d, got %d", busyTimeoutMS, got)
+	}
+}
+
+// TestConcurrentWriteWaitsForLock covers an overlapping run (e.g. cron
+// firing while the previous backup is still writing): with SQLite's default
+// busy handler the second writer fails immediately with SQLITE_BUSY, so Open
+// must set a busy timeout and let it wait for the first writer to commit.
+func TestConcurrentWriteWaitsForLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "concurrent.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatalf("open first store: %v", err)
+	}
+	defer first.Close()
+	second, err := Open(path)
+	if err != nil {
+		t.Fatalf("open second store: %v", err)
+	}
+	defer second.Close()
+
+	// Hold the write lock with an uncommitted transaction.
+	tx, err := first.db.Begin()
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO snapshots (project, config, nonce, ciphertext) VALUES ('proj', 'dev', 'n1', 'c1')`,
+	); err != nil {
+		tx.Rollback()
+		t.Fatalf("insert while holding write lock: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- second.SaveSnapshot("proj", "prd", []byte("n2"), []byte("c2"))
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("expected concurrent write to wait for the lock, got early return: %v", err)
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("concurrent write after lock released: %v", err)
+		}
+	case <-time.After(busyTimeoutMS * time.Millisecond):
+		t.Fatalf("concurrent write did not complete after the lock was released")
+	}
+
+	snaps, err := second.ListSnapshots("")
+	if err != nil {
+		t.Fatalf("list snapshots: %v", err)
+	}
+	if len(snaps) != 2 {
+		t.Fatalf("expected both snapshots to be present, got %d", len(snaps))
 	}
 }

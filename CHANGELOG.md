@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The SQLite database is now opened with a 5s `busy_timeout`, so an
+  overlapping run (e.g. cron firing while the previous backup is still
+  writing) waits briefly for the lock instead of failing immediately
+  with "database is locked".
+
 ## [1.0.0] - 2026-08-03
 
 First stable release, coinciding with the repository going public.
