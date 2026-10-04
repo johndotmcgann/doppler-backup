@@ -75,7 +75,7 @@ Key behavioral details worth knowing before changing command logic:
 
 ## Notes
 
-- `testresults/` and `godocs/` are generated artifacts (from `build.sh`), not source —
-  don't hand-edit them.
+- `testresults/` (from `build.sh`) and `godocs/` (from `godocs.sh`) are generated
+  artifacts, not source — don't hand-edit them.
 - No built-in scheduling; `doppler-backup backup` is expected to be invoked by cron or
   similar.
