@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `x/crypto/openpgp` package, which is not imported and has no fixed
   version. `DeriveKey` output is unchanged, so existing databases still
   decrypt.
+### Fixed
+
+- `godocs.sh`: the `ROOT_PKGS` package listing now carries the same `|| true`
+  guard as `INTERNAL_PKGS`, so `set -e` no longer aborts the script if a
+  module ever has no non-internal packages.
 
 ## [1.0.0] - 2026-08-03
 
