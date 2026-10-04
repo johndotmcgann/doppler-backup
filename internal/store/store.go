@@ -45,6 +45,13 @@ const (
 	legacyScryptP = 1
 )
 
+// busyTimeoutMS is how long SQLite waits for a lock held by another
+// process/connection before giving up with SQLITE_BUSY. SQLite's default
+// is 0, i.e. fail immediately, which would turn an overlapping cron run
+// (or a rotate started while a backup is still writing) into a
+// "database is locked" error rather than a short, silent wait.
+const busyTimeoutMS = 5000
+
 // Open opens (creating if necessary) the SQLite database at path, ensures
 // its schema exists, and locks the file down to owner-only permissions.
 func Open(path string) (*Store, error) {
@@ -63,7 +70,10 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("restrict database permissions: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", path)
+	// busy_timeout makes a writer contending for the lock wait for the
+	// current holder instead of failing immediately. Applied per-connection
+	// by the driver, so every connection in the pool gets it.
+	db, err := sql.Open("sqlite", fmt.Sprintf("%s?_pragma=busy_timeout(%d)", path, busyTimeoutMS))
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
