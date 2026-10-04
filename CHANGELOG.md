@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `godocs.sh`: the `ROOT_PKGS` package listing now carries the same `|| true`
+  guard as `INTERNAL_PKGS`, so `set -e` no longer aborts the script if a
+  module ever has no non-internal packages.
+
 ## [1.0.0] - 2026-08-03
 
 First stable release, coinciding with the repository going public.

@@ -87,7 +87,7 @@ cat > "$INDEX_FILE" << HTMLEOF
 HTMLEOF
 
 # Group packages: root vs internal
-ROOT_PKGS=$(go list ./... | grep -v "/internal/")
+ROOT_PKGS=$(go list ./... | grep -v "/internal/" || true)
 INTERNAL_PKGS=$(go list ./... | grep "/internal/" || true)
 
 if [ -n "$ROOT_PKGS" ]; then
