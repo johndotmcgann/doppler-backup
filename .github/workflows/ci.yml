@@ -24,3 +24,8 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      # Last on purpose: it hits the vuln.go.dev database, so a network flake
+      # here shouldn't stop vet/fmt/test from reporting their own results.
+      - name: Vuln
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
