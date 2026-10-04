@@ -325,6 +325,20 @@ func plaintextTempDir() string {
 	return ""
 }
 
+// createPlaintextTemp creates the decrypted-secrets temp file in dir,
+// preferring the memory-backed directory from plaintextTempDir. A tmpfs
+// that exists can still be unusable — read-only, full, or mounted with
+// restrictive permissions in a container or CI sandbox — so if creating
+// there fails we retry once against the OS default temp dir instead of
+// aborting the restore over a plaintext-location preference.
+func createPlaintextTemp(dir string) (*os.File, error) {
+	f, err := os.CreateTemp(dir, "doppler-backup-*.json")
+	if err != nil && dir != "" {
+		return os.CreateTemp("", "doppler-backup-*.json")
+	}
+	return f, err
+}
+
 func runRestoreWithClient(client dopplerClient, dbPath, project, config, passphrase string, snapshotID int64) error {
 	if err := checkDopplerVersion(client); err != nil {
 		return err
@@ -354,7 +368,7 @@ func runRestoreWithClient(client dopplerClient, dbPath, project, config, passphr
 		return err
 	}
 
-	tmp, err := os.CreateTemp(plaintextTempDir(), "doppler-backup-*.json")
+	tmp, err := createPlaintextTemp(plaintextTempDir())
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}

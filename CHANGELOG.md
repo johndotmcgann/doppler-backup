@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overlapping run (e.g. cron firing while the previous backup is still
   writing) waits briefly for the lock instead of failing immediately
   with "database is locked".
+### Fixed
+
+- `restore` now falls back to the OS default temp dir when the plaintext
+  temp file can't be created in the memory-backed directory — that
+  directory existing doesn't guarantee it's usable (it can be read-only,
+  full, or mounted with restrictive permissions in a container or CI
+  sandbox), and the restore previously aborted outright in that case.
 
 ## [1.0.0] - 2026-08-03
 
