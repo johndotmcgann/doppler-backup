@@ -401,6 +401,58 @@ func TestPlaintextTempDirPrefersTmpfs(t *testing.T) {
 	}
 }
 
+// TestCreatePlaintextTempFallsBackToDefaultDir covers the case where the
+// memory-backed directory exists but is unusable (read-only, full, or
+// restricted in a container/CI sandbox): the temp file must still be
+// created in the OS default temp dir rather than failing the restore.
+func TestCreatePlaintextTempFallsBackToDefaultDir(t *testing.T) {
+	defaultDir := t.TempDir()
+	t.Setenv("TMPDIR", defaultDir)
+
+	unusable := filepath.Join(t.TempDir(), "does-not-exist")
+
+	f, err := createPlaintextTemp(unusable)
+	if err != nil {
+		t.Fatalf("expected fallback to %q to succeed, got: %v", defaultDir, err)
+	}
+	defer os.Remove(f.Name())
+	f.Close()
+
+	if dir := filepath.Dir(f.Name()); dir != defaultDir {
+		t.Fatalf("expected temp file in fallback dir %q, got %q", defaultDir, dir)
+	}
+}
+
+// TestCreatePlaintextTempErrorsWhenFallbackAlsoFails asserts the fallback is
+// a single retry, not a loop: if the OS default temp dir is unusable too, the
+// error surfaces to the caller.
+func TestCreatePlaintextTempErrorsWhenFallbackAlsoFails(t *testing.T) {
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "also-does-not-exist"))
+
+	unusable := filepath.Join(t.TempDir(), "does-not-exist")
+	if f, err := createPlaintextTemp(unusable); err == nil {
+		os.Remove(f.Name())
+		t.Fatalf("expected an error when neither temp dir is usable")
+	}
+}
+
+// TestCreatePlaintextTempUsesDirWhenUsable asserts the preferred dir is used
+// without a needless retry when it works.
+func TestCreatePlaintextTempUsesDirWhenUsable(t *testing.T) {
+	dir := t.TempDir()
+
+	f, err := createPlaintextTemp(dir)
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	defer os.Remove(f.Name())
+	f.Close()
+
+	if got := filepath.Dir(f.Name()); got != dir {
+		t.Fatalf("expected temp file in %q, got %q", dir, got)
+	}
+}
+
 func TestRunRestoreWithClientSpecificSnapshotID(t *testing.T) {
 	dbPath := setTestDB(t)
 
