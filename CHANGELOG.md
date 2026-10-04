@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Added test coverage for the case where `backup`/`restore` can't determine
+  the installed doppler CLI version (e.g. the binary is missing from `PATH`);
+  the version check's error path is now exercised instead of going untested.
+
 ## [1.0.0] - 2026-08-03
 
 First stable release, coinciding with the repository going public.
