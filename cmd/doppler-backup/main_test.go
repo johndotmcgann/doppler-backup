@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -668,6 +669,110 @@ func TestCopyFileFailsOnExistingDestination(t *testing.T) {
 
 	if _, err := copyFile(src); err == nil {
 		t.Fatalf("expected error when backup destination already exists")
+	}
+}
+
+// A copy that fails after the destination was created must not leave a
+// partial ".bak-" file behind: next to the database it would look like a
+// usable backup. A directory as the source makes io.Copy fail (EISDIR)
+// after os.Open and the O_EXCL create have both succeeded.
+func TestCopyFileRemovesPartialBackupOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.db")
+	if err := os.Mkdir(src, 0o700); err != nil {
+		t.Fatalf("create directory as source: %v", err)
+	}
+
+	if _, err := copyFile(src); err == nil {
+		t.Fatalf("expected an error copying a directory")
+	}
+
+	leftovers, err := filepath.Glob(src + ".bak-*")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if len(leftovers) != 0 {
+		t.Fatalf("expected the failed copy to be removed, found %v", leftovers)
+	}
+}
+
+// flushAndClose is what turns a flush/close failure into a copyFile error.
+// Syncing a file that is already closed fails, which stands in for the real
+// causes (disk full, quota) that can't be provoked portably in a test.
+func TestFlushAndCloseReportsErrors(t *testing.T) {
+	f, err := os.Create(filepath.Join(t.TempDir(), "ok"))
+	if err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+	if _, err := f.WriteString("data"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := flushAndClose(f); err != nil {
+		t.Fatalf("expected an open file to flush and close cleanly: %v", err)
+	}
+	if _, err := f.WriteString("more"); err == nil {
+		t.Fatalf("expected the file to be closed after flushAndClose")
+	}
+
+	if err := flushAndClose(f); err == nil {
+		t.Fatalf("expected an error flushing a file that is already closed")
+	}
+}
+
+// captureStderr runs fn with os.Stderr redirected and returns what it wrote.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create pipe: %v", err)
+	}
+	defer r.Close()
+	orig := os.Stderr
+	os.Stderr = w
+	fn()
+	os.Stderr = orig
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe writer: %v", err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	return string(out)
+}
+
+func TestRemovePlaintext(t *testing.T) {
+	dir := t.TempDir()
+
+	present := filepath.Join(dir, "plain.tmp")
+	if err := os.WriteFile(present, []byte("secret"), 0o600); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	if out := captureStderr(t, func() { removePlaintext(present) }); out != "" {
+		t.Fatalf("expected no output removing an existing file, got %q", out)
+	}
+	if _, err := os.Stat(present); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected the file to be removed, stat err = %v", err)
+	}
+
+	// Already gone is fine: the signal handler and the deferred call can both run.
+	if out := captureStderr(t, func() { removePlaintext(present) }); out != "" {
+		t.Fatalf("expected no output for an already-removed file, got %q", out)
+	}
+
+	// A removal that fails must be reported, not swallowed. A non-empty
+	// directory fails with ENOTEMPTY even for root, so this holds in the
+	// container too.
+	stuck := filepath.Join(dir, "stuck")
+	if err := os.Mkdir(stuck, 0o700); err != nil {
+		t.Fatalf("create directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stuck, "child"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write child: %v", err)
+	}
+	out := captureStderr(t, func() { removePlaintext(stuck) })
+	if !strings.Contains(out, "could not remove decrypted temp file "+stuck) || !strings.Contains(out, "delete it manually") {
+		t.Fatalf("expected a warning naming the file, got %q", out)
 	}
 }
 

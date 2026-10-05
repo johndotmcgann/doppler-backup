@@ -1,0 +1,32 @@
+version: "2"
+
+linters:
+  settings:
+    errcheck:
+      # Unchecked error returns that are benign as a category, listed here
+      # instead of blanket-ignoring errcheck so a genuinely meaningful one
+      # (a flush or close on a file that was written, a failed delete of
+      # decrypted data) still stands out:
+      #   - (*os.File).Close: the standard deferred-close idiom, and a close
+      #     error on a read handle or in an error path that already returns
+      #     its own error is not actionable. Writers that matter are closed
+      #     through flushAndClose, which checks it.
+      #   - database/sql Rows.Close, Tx.Rollback and DB.Close, and this
+      #     project's Store.Close (a thin wrapper over DB.Close), mostly
+      #     deferred or in error paths: the original error is what gets
+      #     returned, and a rollback or close after a failure has nothing
+      #     useful to add. Every write goes through a committed transaction.
+      exclude-functions:
+        - (*os.File).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
+        - (*github.com/johndotmcgann/doppler-backup/internal/store.Store).Close
+  exclusions:
+    rules:
+      # Test cleanup (removing a temp file, reaping a killed child process) is
+      # not worth a check in every test.
+      - path: _test\.go
+        linters:
+          - errcheck
+        text: "Error return value of `(os\\.Remove|cmd\\.Wait|cmd\\.Process\\.Kill)`"
