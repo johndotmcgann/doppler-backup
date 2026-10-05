@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-06
+
+### Fixed
+
+- The Release workflow's uploads failed with `HTTP 422: Cannot upload assets
+  to an immutable release` because the repo has immutable releases enabled and
+  v1.0.2's Release was published before any binaries were attached. The
+  `release` job now creates the Release as a draft, the build matrix attaches
+  binaries to the draft, and a new `publish` job publishes it only after every
+  build succeeds. v1.0.2 was published with no binaries; v1.0.3 is the first
+  release shipped this way.
+
 ## [1.0.2] - 2026-10-06
 
 ### Fixed
@@ -245,6 +257,7 @@ First stable release, coinciding with the repository going public.
 - Version injection for production builds via `build.sh`.
 - README with usage instructions and MIT license.
 
+[1.0.3]: https://github.com/johndotmcgann/doppler-backup/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/johndotmcgann/doppler-backup/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/johndotmcgann/doppler-backup/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/johndotmcgann/doppler-backup/compare/v0.10.0...v1.0.0

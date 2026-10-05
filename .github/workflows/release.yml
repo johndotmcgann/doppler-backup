@@ -1,8 +1,9 @@
 name: Release
 
-# The `release` job creates the GitHub Release for the pushed tag if one
-# doesn't exist yet (a manually created one is left untouched); the `build`
-# matrix then attaches binaries to it.
+# The repo has immutable releases enabled: assets can't be added to a published
+# release. So the `release` job creates the Release as a draft if one doesn't
+# exist yet, the `build` matrix attaches binaries to the draft, and `publish`
+# publishes it only once every build succeeded.
 on:
   push:
     tags:
@@ -19,7 +20,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: gh release view "${{ github.ref_name }}" || gh release create "${{ github.ref_name }}" --verify-tag --generate-notes
+        run: gh release view "${{ github.ref_name }}" || gh release create "${{ github.ref_name }}" --draft --verify-tag --generate-notes
 
   build:
     needs: release
@@ -60,3 +61,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.ref_name }}" dist/* --clobber
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "${{ github.ref_name }}" --draft=false
