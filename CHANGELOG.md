@@ -19,7 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build succeeds. v1.0.2 was published with no binaries; v1.0.3 is the first
   release shipped this way.
 
-## [1.0.2] - 2026-10-06
+## [1.0.2] - 2026-10-06 (withdrawn)
+
+> Withdrawn: the release workflow could not attach binaries, so the GitHub
+> Release and the `v1.0.2` tag were deleted. Its changes shipped in 1.0.3.
 
 ### Fixed
 
@@ -29,7 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Release matrix uses `fail-fast: false`, so one failing target no longer
   cancels the other builds.
 
-## [1.0.1] - 2026-10-05
+## [1.0.1] - 2026-10-05 (withdrawn)
+
+> Withdrawn: the release workflow failed and no Release was ever published, so
+> the `v1.0.1` tag was deleted. Its changes shipped in 1.0.3.
 
 ### Added
 
@@ -257,9 +263,7 @@ First stable release, coinciding with the repository going public.
 - Version injection for production builds via `build.sh`.
 - README with usage instructions and MIT license.
 
-[1.0.3]: https://github.com/johndotmcgann/doppler-backup/compare/v1.0.2...v1.0.3
-[1.0.2]: https://github.com/johndotmcgann/doppler-backup/compare/v1.0.1...v1.0.2
-[1.0.1]: https://github.com/johndotmcgann/doppler-backup/compare/v1.0.0...v1.0.1
+[1.0.3]: https://github.com/johndotmcgann/doppler-backup/compare/v1.0.0...v1.0.3
 [1.0.0]: https://github.com/johndotmcgann/doppler-backup/compare/v0.10.0...v1.0.0
 [0.10.0]: https://github.com/johndotmcgann/doppler-backup/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/johndotmcgann/doppler-backup/compare/v0.8.0...v0.9.0
