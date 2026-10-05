@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Release workflow failed with `release not found` on a tag push when no
+  GitHub Release had been created by hand. A new `release` job now creates the
+  Release (with generated notes) if missing, and the build matrix waits on it.
+- Release matrix uses `fail-fast: false`, so one failing target no longer
+  cancels the other builds.
+
 ## [1.0.1] - 2026-10-05
 
 ### Added

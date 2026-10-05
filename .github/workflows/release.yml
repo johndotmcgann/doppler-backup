@@ -1,8 +1,8 @@
 name: Release
 
-# Requires a GitHub Release to already exist for the pushed tag (created
-# manually, e.g. `gh release create v1.2.3`) — this workflow only builds and
-# attaches binaries to it, it does not create the release itself.
+# The `release` job creates the GitHub Release for the pushed tag if one
+# doesn't exist yet (a manually created one is left untouched); the `build`
+# matrix then attaches binaries to it.
 on:
   push:
     tags:
@@ -12,8 +12,19 @@ permissions:
   contents: write
 
 jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release view "${{ github.ref_name }}" || gh release create "${{ github.ref_name }}" --verify-tag --generate-notes
+
   build:
+    needs: release
     strategy:
+      fail-fast: false
       matrix:
         include:
           - goos: linux
