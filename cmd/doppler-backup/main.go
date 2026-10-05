@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -305,8 +306,10 @@ func newRestoreCmd(dbPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&config, "config", "", "config to restore into (required)")
 	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase used to decrypt the snapshot — required; prompts interactively if omitted, or pass this flag explicitly for non-interactive/cron use")
 	cmd.Flags().Int64Var(&snapshotID, "snapshot", 0, "specific snapshot id to restore (default: latest for project/config)")
-	cmd.MarkFlagRequired("project")
-	cmd.MarkFlagRequired("config")
+	// MarkFlagRequired only errors when the named flag doesn't exist, a
+	// programmer error that TestRequiredFlagsEnforced would catch.
+	_ = cmd.MarkFlagRequired("project")
+	_ = cmd.MarkFlagRequired("config")
 	return cmd
 }
 
@@ -372,7 +375,7 @@ func runRestoreWithClient(client dopplerClient, dbPath, project, config, passphr
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
-	defer os.Remove(tmp.Name())
+	defer removePlaintext(tmp.Name())
 
 	// Best-effort cleanup on SIGINT/SIGTERM: deferred cleanup above doesn't
 	// run if the process is killed mid-restore, leaving decrypted secrets
@@ -383,7 +386,7 @@ func runRestoreWithClient(client dopplerClient, dbPath, project, config, passphr
 	go func() {
 		select {
 		case <-sigCh:
-			os.Remove(tmp.Name())
+			removePlaintext(tmp.Name())
 			os.Exit(1)
 		case <-done:
 		}
@@ -516,8 +519,33 @@ func runRotate(dbPath, oldPassphrase, newPassphrase string) error {
 	return nil
 }
 
+// removePlaintext deletes the decrypted temp file restore wrote. A failure is
+// reported on stderr rather than returned (restore has already finished, or
+// is exiting on a signal), but not swallowed: decrypted secrets left on disk
+// are something the user needs to know about. A file that is already gone is
+// fine, since the signal handler and the deferred call can both run.
+func removePlaintext(path string) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "warning: could not remove decrypted temp file %s: %v (delete it manually)\n", path, err)
+	}
+}
+
+// flushAndClose syncs f to disk and closes it, returning the first error.
+// The OS can accept every write and still fail at flush or close time (disk
+// full, quota, a network filesystem), so ignoring these would report success
+// for a truncated file.
+func flushAndClose(f *os.File) error {
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 // copyFile copies path to path + ".bak-<unix timestamp>" with owner-only
-// permissions, and returns the new path.
+// permissions, and returns the new path. The copy is flushed and closed with
+// the errors checked, and a copy that fails part way is removed rather than
+// left next to the database looking like a usable backup.
 func copyFile(path string) (string, error) {
 	src, err := os.Open(path)
 	if err != nil {
@@ -530,10 +558,22 @@ func copyFile(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create %s: %w", dstPath, err)
 	}
-	defer dst.Close()
+	// The deferred Close only covers the early returns; the success path
+	// closes through flushAndClose below, where the error is checked.
+	ok := false
+	defer func() {
+		dst.Close()
+		if !ok {
+			_ = os.Remove(dstPath)
+		}
+	}()
 
 	if _, err := io.Copy(dst, src); err != nil {
 		return "", fmt.Errorf("copy %s to %s: %w", path, dstPath, err)
 	}
+	if err := flushAndClose(dst); err != nil {
+		return "", fmt.Errorf("finish %s: %w", dstPath, err)
+	}
+	ok = true
 	return dstPath, nil
 }

@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test coverage for the case where `backup`/`restore` can't determine
   the installed doppler CLI version (e.g. the binary is missing from `PATH`);
   the version check's error path is now exercised instead of going untested.
+- A `.golangci.yml` that scopes `errcheck` instead of leaving it noisy: the
+  deferred-close idiom (`(*os.File).Close`, `database/sql` `Rows.Close`,
+  `Tx.Rollback`, `DB.Close`) is exempt, as is test cleanup, so an unchecked
+  error that matters stands out. `golangci-lint run ./...` now reports 0 issues
+  (it was 55, all `errcheck`; the default output hides all but 3 identical
+  messages, so it showed 30).
 
 ### Changed
 
@@ -43,6 +49,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `godocs.sh`: the `ROOT_PKGS` package listing now carries the same `|| true`
   guard as `INTERNAL_PKGS`, so `set -e` no longer aborts the script if a
   module ever has no non-internal packages.
+- `rotate`'s pre-rotation backup now syncs and closes the copy with the errors
+  checked, and removes a copy that fails part way. Before, a flush or close
+  failure (disk full, quota) was ignored, so a truncated file could be reported
+  as "previous database preserved"; now the backup fails and the rotation
+  aborts before touching the database.
+- `restore` now warns on stderr, naming the file, when it cannot delete the
+  decrypted temp file, instead of silently leaving decrypted secrets on disk.
+- `restore`'s `--project`/`--config` `MarkFlagRequired` results are explicitly
+  discarded (they can only fail on a misspelt flag name, which
+  `TestRequiredFlagsEnforced` catches).
 
 ## [1.0.0] - 2026-08-03
 
