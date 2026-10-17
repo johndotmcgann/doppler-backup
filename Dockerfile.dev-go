@@ -2,16 +2,26 @@
 # (see Dockerfile.base) so AI harnesses/tooling are already present.
 #
 #   docker build -t dev-base:latest -f Dockerfile.base .   # once, or when updating tools
-#   docker build -t <project>-workspace:latest -f Dockerfile.dev-go .
+#   docker build -t <project>-workspace:latest -f Dockerfile.dev-go \
+#     --build-arg GO_VERSION=1.26.5 --build-arg GO_SHA256=<sha256> .
 #
-# Bump GO_VERSION per project as needed.
+# GO_VERSION and GO_SHA256 are both required (no defaults) so a forgotten pin
+# fails the build instead of silently using a stale toolchain. The sha256 for
+# each release is listed at https://go.dev/dl/?mode=json (go-update.sh looks
+# it up for you).
 
 FROM dev-base:latest
 
-ARG GO_VERSION=1.26.6
+ARG GO_VERSION
+ARG GO_SHA256
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -o /tmp/go.tar.gz \
+# Lets go-update.sh read the installed version without exec'ing into a container.
+LABEL go.version=${GO_VERSION}
+
+RUN test -n "${GO_VERSION}" && test -n "${GO_SHA256}" \
+    && curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -o /tmp/go.tar.gz \
+    && echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum -c - \
     && tar -C /usr/local -xzf /tmp/go.tar.gz \
     && rm /tmp/go.tar.gz
 
@@ -22,6 +32,12 @@ ENV PATH="${GOPATH}/bin:${PATH}"
 # govulncheck and godoc are small, single-purpose tools - go install is fine.
 RUN go install golang.org/x/vuln/cmd/govulncheck@latest \
     && go install golang.org/x/tools/cmd/godoc@latest
+
+# Set only after the installs above: a `@latest` tool may need a newer Go than
+# the pinned one, and that build-time fetch is fine. From here on, never
+# auto-download a newer toolchain when a project's go.mod asks for one — that
+# would silently defeat the pin; a too-new `go` directive fails loudly instead.
+ENV GOTOOLCHAIN=local
 
 # golangci-lint via go install compiles its full dependency graph, which is
 # heavy on this droplet's 1 vCPU/2GB, so fetch the prebuilt release binary
