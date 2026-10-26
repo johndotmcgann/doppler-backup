@@ -79,3 +79,16 @@ Key behavioral details worth knowing before changing command logic:
   artifacts, not source — don't hand-edit them.
 - No built-in scheduling; `doppler-backup backup` is expected to be invoked by cron or
   similar.
+
+## Release workflow
+
+Ship every feature or fix in this order and stop at the first failing step:
+
+1. Implement.
+2. Add or update tests.
+3. Run the tests (`make test`) in this project's workspace container on the droplet. One build or test run at a time: the droplet is 1 vCPU / 2 GB, so never start a second build while one is running.
+4. Update `CHANGELOG.md`.
+5. Commit locally (multiple `-m` flags, no heredocs).
+6. Tag `vX.Y.Z` (semver) after checking `git tag --sort=-v:refname | head -3`. Never move or reuse a tag, and never create throwaway/test tags on this repo; verify build-script changes with a dry run instead.
+7. Deliver: on the client, run `~/bin/fetch-doppler-backup.sh --build` to build in the workspace container and copy the binary back. Nothing is installed on the droplet (dev-only).
+8. Report "ready" with the commit and tag. Do not `git push` (commits or tags) unless I explicitly ask.
